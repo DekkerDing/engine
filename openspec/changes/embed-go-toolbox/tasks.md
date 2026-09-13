@@ -10,8 +10,8 @@
 
 ## 2. Java 侧通道与装配开关
 
-- [ ] 2.1 新增 `infrastructure/golang/GoProcessLauncher`（按 `os.name/os.arch` 从 `classpath:/golang/<platform>/` 解压到 `./go-runtime/` 并拉起，镜像 `PythonProcessLauncher`）；验证：单测断言平台目录解析与解压产物路径
-- [ ] 2.2 新增 `GoChannel` 接口与 `StdioGoChannel`（常驻读线程 + `BlockingQueue` + 毒丸 + `synchronized call()` + 超时，镜像 `StdioChannel`）；验证：集成测试跑通 call→响应往返与超时分支（假进程/短超时构造）
+- [x] 2.1 新增 `infrastructure/golang/GoProcessLauncher`（按 `os.name/os.arch` 从 `classpath:/golang/<platform>/` 解压到 `./go-runtime/` 并拉起，镜像 `PythonProcessLauncher`）；验证：单测断言平台目录解析与解压产物路径（实测：6 项全过——平台对表/windows-exe 命名/解压路径与复用/缺失资源修复指引/home 直指与目录两式/home 不存在快败）
+- [x] 2.2 新增 `GoChannel` 接口与 `StdioGoChannel`（常驻读线程 + `BlockingQueue` + 毒丸 + `synchronized call()` + 超时，镜像 `StdioChannel`）；验证：集成测试跑通 call→响应往返与超时分支（假进程/短超时构造）（实测：FakeGoToolbox 假进程 5 项全过——握手往返、超时+迟到帧自愈、未知方法 1001 通道存活、优雅关闭后未运行、启动前快败）
 - [ ] 2.3 新增 `GoToolboxClient`（门面：方法名 + params → result，base64 float32 编解码工具）与 `engine.go.*` 配置项（enabled 默认 false / call-timeout / startup-timeout）；验证：单测覆盖 base64 向量编解码 round-trip
 - [ ] 2.4 `@ConditionalOnProperty` 装配：enabled=true 时启动即拉起 + `sys.ping` 握手；false 时零装配（无 Go 进程）；验证：两种配置各启动一次，true 时日志含握手成功、false 时无 go-runtime 目录创建
 - [ ] 2.5 毒丸与崩溃语义：杀死 Go 子进程后在途/后续 call 快速失败、`@PreDestroy` 发 shutdown；验证：集成测试杀进程后断言调用抛「引擎不可用」且不再阻塞
