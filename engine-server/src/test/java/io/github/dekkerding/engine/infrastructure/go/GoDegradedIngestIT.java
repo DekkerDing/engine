@@ -67,7 +67,8 @@ class GoDegradedIngestIT {
         assumeTrue(engineAvailable(), "本机无 Go 工具链/二进制，跳过降级闭环");
     }
 
-    private static boolean engineAvailable() {
+    /** 包级可见：同包的姊妹 IT（GoReplicaSyncIT 等）共用同一探测，避免三份拷贝。 */
+    static boolean engineAvailable() {
         try {
             new GoProcessLauncher("", "go").resolve();
             return true;

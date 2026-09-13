@@ -88,9 +88,15 @@ class GoVectorIndexRoutingTest {
 
     // ---------- 闸门语义对齐（任务 4.3 验收主项） ----------
 
+    /** replace 的复制确认帧（4.4 起每次 replace 都会先发 vector.insert——脚本须备帧）。 */
+    private static String insertAck(int n) {
+        return "{\"id\":0,\"result\":{\"inserted\":" + n + ",\"total\":" + n + "}}";
+    }
+
     @Test
     void 同模态模型切换_Go轨空结果_经本地轨闸门抛400与指引() {
         ScriptedChannel fake = new ScriptedChannel();
+        fake.enqueue(insertAck(1));
         // Go 副本视角：按新模型 go-hash-degraded 过滤 → 空命中（副本里没有该空间的条目）
         fake.enqueue("{\"id\":1,\"result\":{\"hits\":[],\"count\":0}}");
         InMemoryVectorIndex routed = new InMemoryVectorIndex(new GoVectorReplica(fake));
@@ -113,6 +119,7 @@ class GoVectorIndexRoutingTest {
     @Test
     void Go轨命中_回表组装完整条目() {
         ScriptedChannel fake = new ScriptedChannel();
+        fake.enqueue(insertAck(2)); // replace 的复制帧（先于检索被消耗）
         fake.enqueue("{\"id\":1,\"result\":{\"hits\":["
                 + "{\"document_id\":\"d1\",\"chunk_index\":1,\"score\":0.9},"
                 + "{\"document_id\":\"d1\",\"chunk_index\":0,\"score\":0.5}"
@@ -142,7 +149,8 @@ class GoVectorIndexRoutingTest {
         List<VectorHit> baseline = localOnly.search(new float[]{1f, 0f}, 5, "text", "go-hash-degraded");
 
         ScriptedChannel fake = new ScriptedChannel();
-        fake.failWith(new RuntimeException("模拟引擎崩溃：进程已退出"));
+        fake.enqueue(insertAck(1)); // replace 的复制先成功
+        fake.failWith(new RuntimeException("模拟引擎崩溃：进程已退出")); // 检索时崩溃
         InMemoryVectorIndex routed = new InMemoryVectorIndex(new GoVectorReplica(fake));
         routed.replace("d1", Arrays.asList(
                 textEntry("d1", 0, "go-hash-degraded", "唯一块", 1f, 0f)));
@@ -157,6 +165,7 @@ class GoVectorIndexRoutingTest {
     @Test
     void 回表miss_降级本地扫描() {
         ScriptedChannel fake = new ScriptedChannel();
+        fake.enqueue(insertAck(1)); // replace 的复制帧
         // 副本命中一条主索引没有的条目（同步断裂的理论病态）→ 兜底
         fake.enqueue("{\"id\":1,\"result\":{\"hits\":["
                 + "{\"document_id\":\"ghost\",\"chunk_index\":0,\"score\":0.99}"

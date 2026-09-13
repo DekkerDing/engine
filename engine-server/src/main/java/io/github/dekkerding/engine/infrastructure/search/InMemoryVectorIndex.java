@@ -74,12 +74,27 @@ public class InMemoryVectorIndex {
     /**
      * 写入/覆盖一个文档的全部条目（幂等：同 documentId 旧条目整体替换）。
      *
+     * <p>【副本同步（gotoolbox 场景二 · design D4）】本地更新（持锁）后、本方法返回前，
+     * 同步复制进 Go 副本——"复制先于摄取返回"的一致性边界由此保证（摄取链路
+     * save() 的最后一步就是本方法）。副本失败只 warn 不上抛：副本是加速器不是真相，
+     * 缺失的数据由检索的本地轨兜底覆盖（见 Go 轨路由的降级设计）——摄取永远不因
+     * 副本而失败。
+     *
+     * <p>【锁纪律】本地替换在 replaceLocal 的 synchronized 内；副本复制（通道 IO）
+     * 在锁外——与检索的锁纪律同款：持锁调通道会把并发的读路径堵死在 IO 上。
+     *
      * <p>【自防御归一化】Python 端 encode(normalize_embeddings=True) 已保证 L2=1，
      * 但内存索引不信任上游契约——加进来时若模长偏离 1 就存一份归一化副本专供打分。
      * 代价：每条目最多一次数组拷贝；收益：分数语义永远是余弦 ∈ [-1,1]，
      * 即使将来某个新模型忘了归一化，检索结果也不会悄悄错。
      */
-    public synchronized void replace(String documentId, List<VectorEntry> entries) {
+    public void replace(String documentId, List<VectorEntry> entries) {
+        replaceLocal(documentId, entries);
+        replicateToGo(() -> goReplica.replace(documentId, entries),
+                "vector.insert " + documentId);
+    }
+
+    private synchronized void replaceLocal(String documentId, List<VectorEntry> entries) {
         List<IndexedEntry> indexed = new ArrayList<>(entries.size());
         for (VectorEntry entry : entries) {
             indexed.add(new IndexedEntry(entry, normalizedCopy(entry)));
@@ -88,11 +103,31 @@ public class InMemoryVectorIndex {
         size += indexed.size() - (old == null ? 0 : old.size());
     }
 
-    /** 删除一个文档的全部条目（文档删除联动清理） */
-    public synchronized void remove(String documentId) {
+    /**
+     * 删除一个文档的全部条目（文档删除联动清理）——副本同步语义同 {@link #replace}。
+     */
+    public void remove(String documentId) {
+        removeLocal(documentId);
+        replicateToGo(() -> goReplica.remove(documentId),
+                "vector.delete " + documentId);
+    }
+
+    private synchronized void removeLocal(String documentId) {
         List<IndexedEntry> removed = byDocument.remove(documentId);
         if (removed != null) {
             size -= removed.size();
+        }
+    }
+
+    /** 副本复制：失败降级为 warn（副本缺数据由检索本地轨兜底），永不上抛阻塞摄取。 */
+    private void replicateToGo(Runnable replication, String what) {
+        if (goReplica == null) {
+            return; // 关闭态：零副本流量（默认零变化的装配保证）
+        }
+        try {
+            replication.run();
+        } catch (Exception e) {
+            log.warn("Go 副本同步失败（{}）：副本缺失部分由检索本地轨兜底: {}", what, e.getMessage());
         }
     }
 
