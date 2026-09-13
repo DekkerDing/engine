@@ -14,7 +14,8 @@
 - [x] 1.1 前置检查：搜索 engine-server 是否已有 `WebMvcConfigurer`/资源 handler 配置，确认无冲突（有则合并方案记录到 design.md），验证方式为 grep 结果空或已记录合并结论；commit（锚点 1.1）
 - [x] 1.2 从 git HEAD 捞回 `WebStaticConfig`/`SpaFallbackResolver`/`AssetCacheFilter` 三件套，改包名入 `engine.interfaces.web`，修正注释引用，验证编译通过 `gradlew :engine-server:compileJava` 后 commit（锚点 1.2）
 - [x] 1.3 新增 `ApiPrefixRewriteFilter`（OncePerRequestFilter + HttpServletRequestWrapper 同时覆写 getRequestURI/getServletPath，仅 `/api` 前缀生效，FilterRegistrationBean HIGHEST_PRECEDENCE），验证编译通过后 commit（锚点 1.3）
-- [ ] 1.4 `SystemController` 健康端点组装合体结构（server 恒 UP 自证 + gateway 段保留 + engine/documents 透传 + 整体 status 判定），验证启动后 `curl :8081/api/system/health` 返回 `{status, gateway, server, engine, documents}` 且 engine null 时整体 UP，commit（锚点 1.4）
+- [x] 1.4 `SystemController` 健康端点组装合体结构（server 恒 UP 自证 + gateway 段保留 + engine/documents 透传 + 整体 status 判定），验证启动后 `curl :8081/api/system/health` 返回 `{status, gateway, server, engine, documents}` 且 engine null 时整体 UP，commit（锚点 1.4）
+  - 实测：合体结构逐字段正确（engine 语义化 {status:UP, detail:{...}}，overall UP，信封完整）；engine null 分支经代码审查确认（Go 版逻辑直译且 Go 版已实测）——当前架构 PythonChannel 为强制依赖，真实进程不可达该分支，作防御性契约保留
 - [ ] 1.5 集成验证（8081 双轨并存）：`curl :8081/`（200 HTML）、`:8081/search`（SPA 回退 200）、`:8081/assets/<hash>.js`（immutable 头）、`:8081/index.html`（200 + no-cache，无 301）、`:8081/api/no-such`（404 非 HTML）、带中文查询串 API 调用参数解码正确；全部通过后 commit（锚点 1.5）
 
 ## [W1] 2. 前端工程移入 engine-server 并迁移构建编排 —— 与组 1 并行
