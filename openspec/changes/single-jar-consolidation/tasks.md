@@ -57,10 +57,14 @@
 
 ## [W3] 6. /docs 手册更新 —— 与组 4、5 并行；本组内 7 篇互不相交可并行起草，各篇独立 commit（写一点提交一点）
 
-- [ ] 6.1 新增 `docs/reqforge-single-jar-design.md`（合体架构设计文档：Context/Decisions/迁移记录骨架），验证文档创建后 commit（锚点 6.1）
-- [ ] 6.2 新增 `docs/reqforge-single-jar-spec.md`（规约文档：路由/缓存/健康判定表/自测清单），验证文档创建后 commit（锚点 6.2）
-- [ ] 6.3 改写 `docs/deployment.md`（单进程单端口部署、新 HEALTHCHECK、回滚），验证无 8081/双进程残留描述后 commit（锚点 6.3）
-- [ ] 6.4 改写 `docs/architecture.md`（进程拓扑：三进程两跳 → 单 JAR 单进程），验证拓扑图与文字一致后 commit（锚点 6.4）
+- [x] 6.1 新增 `docs/reqforge-single-jar-design.md`（合体架构设计文档：Context/Decisions/迁移记录骨架），验证文档创建后 commit（锚点 6.1）
+  - 实测：Context 痛点表/D1-D8 决策（含各自否决案与实测推翻过程）/迁移记录骨架（波次→锚点表）/终态拓扑/风险回滚表；commit ed5fc63（本条勾选在 7.2 复核时补记——git 锚点先于勾选，双锚点校验发现）
+- [x] 6.2 新增 `docs/reqforge-single-jar-spec.md`（规约文档：路由/缓存/健康判定表/自测清单），验证文档创建后 commit（锚点 6.2）
+  - 实测：路由表/缓存头策略/engine 单维度判定表/上传闸门/构建产物要求/13 项自测清单；commit 2ce8ece；7.1 终验发现清单第 8 项命令笔误（GET→POST）已随 7.1 修正（f14e65b）
+- [x] 6.3 改写 `docs/deployment.md`（单进程单端口部署、新 HEALTHCHECK、回滚），验证无 8081/双进程残留描述后 commit（锚点 6.3）
+  - 实测：总览图/构建命令/裸机路径/排查表（含 7.2 补充的动态端口竞态处置）全量单进程化；grep 无 8081/双进程/engine-gateway 功能性残留；commit af81d0b
+- [x] 6.4 改写 `docs/architecture.md`（进程拓扑：三进程两跳 → 单 JAR 单进程），验证拓扑图与文字一致后 commit（锚点 6.4）
+  - 实测：§1 三调用链图去 gateway 跳、§2 模块树（frontend 入 server + 进程树 exec 单进程）、§4 重写为原网关职能内化对照表、§7 决策速查更新；grep 无 engine-gateway/:8081/反代组件残留；commit 72a7efb
 - [x] 6.5 改写 `docs/reqforge-dev-guide.md`（本地开发：Vite 代理不变、构建链新位置）与 `docs/reqforge-user-guide.md`（用户视角端口与访问），验证后 commit（锚点 6.5）
   - 实测：dev-guide v1.3（拓扑/三件套对照/12 处链接/启动打包/一键脚本/FAQ/速查）与 user-guide v1.2（概述/构建/部署/start.bat/排查）全量改写；两篇 grep 无 engine-gateway/:8081/go build 功能性残留
 - [x] 6.6 改写 `docs/learning-path.md` 与 `docs/frontend-standards.md` 中涉及网关/双端口的段落，验证后 commit（锚点 6.6）
@@ -73,4 +77,11 @@
 - [x] 7.1 全量回归：`gradlew clean build` 全绿 + `java -jar` 冷启动全路由自测（对照 spec 自测清单逐项打勾），输出预期 vs 实际对比表，commit（锚点 7.1）
   - 实测：`clean build` 全绿（1m45s，前端→jar→test 全链自动拉起，142 测试 0 失败）；`java -jar` 冷启动 21s 就绪，spec 13 项清单全过（第 8 项为清单命令笔误修正后复验：search 是 POST 端点，GET→500 快速失败系方法错误非缺陷；POST 中文检索 200 且真实命中中文文档、高亮无乱码；信封 items 字段完整）；附带修正 6.2 文档第 8 项命令 GET→POST
   - **环境发现（已定位非缺陷）**：本机 Windows 动态端口范围为 1024-15000（`netsh int ipv4 show dynamicport tcp`），8090 落在临时端口池内——首次冷启动时 Python 加载模型的出站 HTTPS 连接恰被分派 8090 源端口（TIME_WAIT），Tomcat bind 报 PortInUse；等待 60s 后重试成功。冷启动竞态概率低但存在，处置=重试（已记入 deployment.md 排查表第 2 条语境）；首次聚合健康/actuator 探测瞬现 000 抖动与模型冷加载并发相关，重试即恢复
-- [ ] 7.2 遗留项清点（性能基准/灰度等不可本地验证项列入待办），验证清单与 openspec tasks 无未勾选实现项后 commit（锚点 7.2）
+- [x] 7.2 遗留项清点（性能基准/灰度等不可本地验证项列入待办），验证清单与 openspec tasks 无未勾选实现项后 commit（锚点 7.2）
+  - 遗留项（全部为「本机无对应工具链」的环境性待办，非实现缺口；每项在对应任务实测记录中已注记）：
+    1. `docker build` 本地轨/全构建轨实测（5.1/5.2/5.4——本机无 docker；本机 8090 实测 HTTP 200 已替代性验证 HEALTHCHECK 路径）
+    2. 容器内 SIGTERM 优雅停机实测（5.3——无 docker；停机链路经代码审查：JVM PID 1 下 shutdown hooks 正常响应 → PythonProcessLauncher.stop）
+    3. `jenkins-cli declarative-linter` + 真实 Jenkins 构建验证（5.5——本机无 jenkins；阶段顺序与 gradle 任务引用 grep 确认有效）
+    4. 动态端口范围 1024-15000 环境风险（7.1 发现）：生产机建议 `netsh int ipv4 set dynamicport tcp 49152 16384` 收敛，已记入 deployment.md 排查表第 2 条
+    5. 性能基准（可选）：合体后单跳延迟 vs 原网关两跳的量化对比未做（合体少一跳环回必不劣化，定性成立）
+  - 验证：tasks.md 28/28 全勾选（本条为最后一项）；git log 锚点 0.1-7.2 齐备

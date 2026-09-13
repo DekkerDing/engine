@@ -168,7 +168,7 @@ IDE 用户用 Stop 按钮（等价发 SIGTERM，同样走 hook）。
 | # | 症状 | 原因 | 处置 |
 |---|------|------|------|
 | 1 | 启动报 `Lucene 索引初始化失败` | 上次异常退出残留 `lucene-index/write.lock`，或已有实例在跑 | 确认无 java 进程后删除 `lucene-index/write.lock` 重启 |
-| 2 | 端口被占但 `netstat -ano \| findstr 8090` 查不到 | Windows 端口处于 **Bound**（非 LISTENING）状态，netstat 默认显示不全 | 用 PowerShell `Get-NetTCPConnection -LocalPort 8090` 查 PID 后 `taskkill /F /PID <pid>`；实在不行换端口（改 `application.yml` 的 `server.port`） |
+| 2 | 端口被占但 `netstat -ano \| findstr 8090` 查不到 | Windows 端口处于 **Bound**（非 LISTENING）状态，netstat 默认显示不全；另一种形态：出站连接的**临时源端口**恰被分派 8090（本机动态端口范围 1024-15000 含 8090，`netsh int ipv4 show dynamicport tcp` 可查），TIME_WAIT 撞 Tomcat bind 报 PortInUse | 用 PowerShell `Get-NetTCPConnection -LocalPort 8090` 查 PID 后 `taskkill /F /PID <pid>`；TIME_WAIT 形态等 60-120s 自散后重试即可（7.1 终验实测过一次）；根治可收敛动态端口范围 `netsh int ipv4 set dynamicport tcp 49152 16384`；实在不行换端口（改 `application.yml` 的 `server.port`） |
 | 3 | 启动报 `Py4J 通道 ... 未就绪` 或 `未找到 Python 脚本目录` | 25335 被占用 / Python 环境损坏 / 启动目录不对（`./python` 探测落空） | `Get-NetTCPConnection -LocalPort 25335` 排查占用；`python -c "import torch"` 验证依赖；从 `engine-server/` 目录启动或 `--engine.python.home=` 显式指定 |
 | 4 | bootRun 日志中文乱码 | Windows 默认 GBK | 构建脚本已统一 UTF-8；若终端仍乱码，Git Bash 执行 `export LANG=zh_CN.UTF-8`，或 IDEA `Help→Edit Custom VM Options` 加 `-Dfile.encoding=UTF-8` |
 | 5 | 页面 404（API 正常） | jar 内缺前端产物（构建时前端任务链被跳过） | 重新构建：`./gradlew :engine-server:bootJar`，解包验证 `BOOT-INF/classes/static/index.html` 存在 |
