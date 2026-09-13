@@ -13,6 +13,7 @@
 ─────────────                      ─────────────
 Java 8 / Spring Boot    ──────▶    Python 3（后端脚本 + 模型推理）
                                    React 18 + TypeScript（前端工程）
+                                   Go 1.21+（嵌入计算引擎，第六阶段）
 DDD 分层思想（本仓库 Java 侧）──▶   同样的分层纪律应用到 Python 与前端
 ```
 
@@ -129,17 +130,76 @@ CLIP 文本塔编码查询（`core/vision.py`）→ 仅扫 image 空间（`(sour
 
 ---
 
+## 第六阶段：Go 语言与嵌入引擎（1.5 天，gotoolbox）
+
+> 仓库第四栈：Go 作为**嵌入计算引擎**活在 `engine-server/golang/`——
+> 承接文本处理、哈希降级向量、并行向量检索三组高 CPU 工具。动机与设计
+> 详见 [gotoolbox-design](file:///F:/workspace/engine/docs/reqforge-gotoolbox-design.md)
+> （其第 5 节是本阶段的详版路线图），行为契约见
+> [gotoolbox-spec](file:///F:/workspace/engine/docs/reqforge-gotoolbox-spec.md)。
+
+### 6.1 心智转换（30 分钟）
+
+| Java | Go | 仓库样例 |
+|------|-----|----------|
+| class + package | 包 = 目录，首字母大写即 public | `golang/internal/router/router.go` |
+| 异常 throw/catch | `err` 返回值逐层检查 | `golang/internal/protocol/` |
+| try-finally | `defer` | `golang/cmd/toolbox/main.go` |
+| interface + implements | 接口**隐式实现**（结构体长得像就行） | `golang/internal/router/` 的 Handler |
+| Thread + CountDownLatch | goroutine + `sync.WaitGroup` | `golang/internal/vector/search.go` |
+| String.charAt | `[]rune(s)`（`len(s)` 是**字节数**！） | `golang/internal/text/` |
+
+### 6.2 走读路线（按依赖顺序，每站 30-60 分钟）
+
+1. **协议循环**：`golang/cmd/toolbox/main.go` + `golang/internal/protocol/`——
+   读一行 JSON → 查注册表 → 写一行 JSON。最小完整闭环，对照 Jackson 的
+   struct tag（`json:"id"`）。
+2. **注册表**：`golang/internal/router/`——`map[string]Handler` 一张表就是
+   Spring 的方法表；"新增方法零协议改动"的秘密。
+3. **注册全家福**：`golang/internal/engine/engine.go`——11 个方法的参数
+   结构体与错误翻译（panic → 1002 帧）。
+4. **中文处理**：`golang/internal/text/`——string 是 byte 序列，中文一个字
+   3 字节；rune 感知硬切对照 Java `TextChunker`（`domain/service/`）。
+5. **确定性哈希**：`golang/internal/hashing/`——降级向量的实现体（Java 侧
+   无对应实现，Go 专属）。
+6. **副本索引**：`golang/internal/vector/index.go`——map delete 内置函数、
+   切片共享底层数组的深拷贝陷阱。
+7. **并行扫描 ⭐**：`golang/internal/vector/search.go`——三阶段（持锁快照 →
+   goroutine 分片无锁算 → WaitGroup 归并）+ 量化定序；Java 对应物
+   `InMemoryVectorIndex.topK()` 与 Go `sortHits` 逐字同款。
+8. **回到 Java**：`infrastructure/go/` 五件套（GoProcessLauncher →
+   GoStdioChannel → GoProtocol → GoVectorReplica / GoToolboxProvider）+
+   `infrastructure/search/InMemoryVectorIndex` 的路由与三态降级。
+
+**毕业考**：给引擎加 `text.length`（返回 rune 数与 byte 数）——Go 一个函数 +
+一行注册 + 一个单测，Java 加 DTO 与门面方法，协议层零改动。
+
+### 6.3 动手开关（体验两级门控）
+
+```bash
+# 真进程管道手测（Go 版 echo）
+$ cd engine-server/golang && echo '{"id":1,"method":"sys.ping","params":{}}' | go run ./cmd/toolbox
+# 开启态启动（Go 引擎拉起，健康段 goToolbox=UP）
+$ java -jar engine-server/build/libs/engine-server.jar \
+    --spring.profiles.active=go-toolbox --engine.go.enabled=true
+# 健康观测
+$ curl -s localhost:8090/api/system/health | python -m json.tool   # 找 goToolbox 段
+```
+
+---
+
 ## 附录 A：概念速查表（Java ↔ Python ↔ 前端）
 
-| 概念 | Java（本仓库） | Python | 前端 |
-|------|----------------|--------|------|
-| 模块化 | package / Gradle 模块 | package（目录 + `__init__.py`）/ pip | ES Module / npm |
-| 依赖注入 | Spring `@Autowired` 构造注入 | 显式传参（无容器） | props / hooks |
-| 配置 | application.yml | 环境变量（`ENGINE_*`） | vite 环境文件 |
-| 异常体系 | EngineException + 全局 handler | raise + Java 侧翻译 | client.ts 统一抛错 + toast |
-| 异步 | 固定线程池 | 单线程事件循环足够 | async/await（Promise） |
-| 日志 | slf4j/logback | logging → stderr | console → 浏览器 devtools |
-| 测试 | JUnit + IT 任务 | 手测/echo 冒烟 | build 零错 + 手测 |
+| 概念 | Java（本仓库） | Python | 前端 | Go（gotoolbox） |
+|------|----------------|--------|------|-----------------|
+| 模块化 | package / Gradle 模块 | package（目录 + `__init__.py`）/ pip | ES Module / npm | 包 = 目录 / go.mod（零三方依赖） |
+| 依赖注入 | Spring `@Autowired` 构造注入 | 显式传参（无容器） | props / hooks | 显式传参 + main 三步装配 |
+| 配置 | application.yml | 环境变量（`ENGINE_*`） | vite 环境文件 | 无配置（参数即帧） |
+| 异常体系 | EngineException + 全局 handler | raise + Java 侧翻译 | client.ts 统一抛错 + toast | err 返回值 + error 帧（1001/1002） |
+| 异步 | 固定线程池 | 单线程事件循环足够 | async/await（Promise） | goroutine + WaitGroup |
+| 并发原语 | synchronized / BlockingQueue | GIL 下队列 | — | sync.WaitGroup / channel |
+| 日志 | slf4j/logback | logging → stderr | console → 浏览器 devtools | stderr（stdout 是协议专线） |
+| 测试 | JUnit + IT 任务 | 手测/echo 冒烟 | build 零错 + 手测 | go test（`-race` 常开）+ 管道手测 |
 
 ## 附录 B：上手命令速查
 
@@ -155,4 +215,7 @@ $ echo '{"op":"stats"}' | python engine-server/python/server_stdio.py
 # 测试
 $ ./gradlew :engine-server:test                  # 单测
 $ ./gradlew :engine-server:channelIT             # 通道集成测试（需 Python 环境）
+# Go（gotoolbox）
+$ cd engine-server/golang && go test ./...       # Go 单测（含 -race 见各包）
+$ ./gradlew :engine-server:buildGoToolbox        # 双平台交叉编译（指纹缓存）
 ```

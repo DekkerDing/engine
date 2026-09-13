@@ -46,7 +46,7 @@
 
 - [x] 7.1 新增 `docs/reqforge-gotoolbox-design.md`（含架构图、D1-D9 决策、「Go 速成路线图」按代码走读顺序）；验证：文档内引用的文件路径/行号与代码一致（实测：七节结构——一句话三场景表 / ASCII 架构图（读图三要点：请求只进 Java、InMemoryVectorIndex 四角色枢纽、降级路径永远在）/ D1-D10 决策定稿摘要各带代码锚点（design.md 实有 D10，任务原文 D1-D9 为拟稿时计数，全量收录）/ Go+Java 组件地图两表 / Go 速成路线图 8 站+毕业考（第 7 站并行扫描标全文档最重要）/ 构建部署速查 / 与既有文档关系表；路径核对脚本全过（18 处引用逐一 OK，GoProtocol 补 protocol 子包标注；gotoolbox-spec.md 为 7.2 前向引用）；引用以路径+符号锚点为主避免行号漂移）
 - [x] 7.2 新增 `docs/reqforge-gotoolbox-spec.md`（协议帧、方法注册表契约、副本同步语义、开关矩阵）；验证：与 spec delta 逐条对照无遗漏（实测：七节——协议帧（id 纪律/错误码表 1001/1002/毒丸/超时）/ 11 方法注册表逐方法参数与 result 键名（全部从 engine.go struct tag 与 Java 门面组装键 grep 钉死，含命名差异须知：insert 条目 doc_id/chunk_idx vs search 命中 document_id/chunk_index 历史沿革如实记录）/ 副本同步语义六条（同步复制/失败容忍/启动灌入/三态降级/定序合同/空间过滤）/ 开关矩阵四行表（false+Profile=装配失败快败行如实收录）/ 健康段契约 / 构建部署契约（定位链五级）/ spec delta 对照表 8:8 全映射（每个 Requirement 的 Scenario 融入对应章节）；text.chunk result 键核对代码修正为 chunks+count——文档键名不经代码核实不落笔）
-- [ ] 7.3 改写 `docs/learning-path.md` 增补 Go 章节与走读路线；验证：章节引用的代码锚点存在
+- [x] 7.3 改写 `docs/learning-path.md` 增补 Go 章节与走读路线；验证：章节引用的代码锚点存在（实测：四处增补——第 0 节全景图加 Go 一行（仓库第四栈）；新增第六阶段「Go 语言与嵌入引擎」（6.1 心智转换六对表含 len(s)=字节数的坑 / 6.2 八站走读路线引用 design 第 5 节详版防重复展开 / 6.3 动手开关三命令）；附录 A 速查表扩 Go 列（八行，含"stdout 是协议专线""goroutine+WaitGroup"本仓库特化对照）；附录 B 加 Go 命令两行；锚点核对脚本 13 处全 OK，文档内 go run 管道手测命令实际执行返回 pong 0.2.0——文档命令可复现）
 - [ ] 7.4 改写 `docs/reqforge-dev-guide.md`（本地构建需 Go、开关说明、常见排查：防病毒/端口/离线）；验证：按文档从零构建一遍可复现
 
 ## 8. 全量回归与收尾
