@@ -1,22 +1,28 @@
 # ============================================================
 # Dockerfile — 本地构建轨（日常迭代）
 # ------------------------------------------------------------
-# 【前提】先在本机完成 server jar + 前端产物 + Go 网关二进制的构建：
-#     ./gradlew :engine-server:bootJar buildFrontend copyFrontendDist
-#     cd engine-gateway && GOOS=linux GOARCH=amd64 go build -o engine-gateway .
+# 【前提】先在本机完成单 JAR 合体构建（前端产物与 python 脚本已打进 jar）：
+#     ./gradlew :engine-server:bootJar
+#     （buildFrontend/copyFrontendDist/packagePython 已被 bootJar 自动依赖）
 # 【构建】（在仓库根目录执行，构建上下文 = 仓库根）：
 #     docker build -f docker/Dockerfile -t text-vector-engine:local .
 # 【运行】：
 #     docker run -d -p 8090:8090 -v engine-data:/app/data \
 #          --name engine text-vector-engine:local
 #
+# 【单 JAR 合体】一个 fat jar、一个 Java 进程、一个 8090 端口承载全部：
+#   REST API(/api/**) + 前端静态资源(BOOT-INF/classes/static/) + SPA 回退
+#   + actuator/health + Python 向量化子进程。原 Go 网关进程与 :8081 内部
+#   端口随合体消失（对外 HTTP 契约逐字节不变）。
+#
 # 【分层策略】按"变更频率从低到高"排序，最大化层缓存复用：
 #     系统依赖(几乎不变) → pip 依赖(很少变) → 模型权重(很少变)
-#     → 应用层(server jar + Go 网关二进制/静态产物，每次迭代变)
+#     → 入口脚本+python 脚本(低频) → 应用 jar(每次迭代变)
 # 模型层约 600MB、torch 层约 900MB，放前面使日常迭代构建秒级完成。
 #
-# 【运行时无 Node、网关无 JRE】镜像内没有 node/npm——前端已编译为静态产物
-# 由 Go 网关承载（/app/static）；JRE 仅 server 使用（spec: 运行时镜像不含 Node）。
+# 【运行时无 Node / 无 Go 工具链】前端已编译进 jar 的 static/，镜像内没有
+# node/npm，也没有 golang——运行时只需要 JRE + python3（spec: 运行时镜像
+# 不含 Node）。
 # ============================================================
 
 # 基础镜像：temurin 8-jre + Ubuntu 22.04 (jammy)
@@ -43,7 +49,7 @@ RUN apt-get update \
         python3 python3-pip python-is-python3 curl \
     && rm -rf /var/lib/apt/lists/*
 
-# 中文日志/文件名兜底：容器内统一 UTF-8（对应 gateway-routing/全链路中文编码）
+# 中文日志/文件名兜底：容器内统一 UTF-8（对应全链路中文编码要求）
 ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
 
 # ---------- 第 2 层：pip 依赖（随 requirements.txt 变更才重建） ----------
@@ -65,25 +71,26 @@ RUN python3 /app/download_models.py /app/models
 ENV SENTENCE_TRANSFORMERS_HOME=/app/models
 ENV HF_HOME=/app/models
 
-# ---------- 第 4 层：入口脚本（低频变更，置于 jar 前） ----------
+# ---------- 第 4 层：入口脚本 + Python 脚本目录（低频变更，置于 jar 前） ----------
 COPY docker/entrypoint.sh /app/entrypoint.sh
+# 【为什么 jar 内已有 python/ 还要 COPY 到文件系统】fat jar 把 python/ 打进
+# BOOT-INF/classes/ 满足"单 jar 资产自包含"，但 PythonProcessLauncher 按文件
+# 系统路径探测脚本目录（./python ← 容器内 CWD=/app 命中），不读 jar 内资源。
+# 旧双进程架构同样缺这一层——Python 通道在容器内从未真正可用，本次合体补齐
+COPY engine-server/python/ /app/python/
 RUN chmod +x /app/entrypoint.sh
 
 # ---------- 第 5 层：应用（日常迭代只重建这层） ----------
-# server：Java jar；gateway：Go 单二进制 + 前端静态产物 + 配置
-# （网关二进制需在本机先交叉编译：cd engine-gateway && GOOS=linux GOARCH=amd64 go build -o engine-gateway .）
+# 单 JAR 合体：一个 fat jar 携带 API + 前端静态产物 + python 脚本资产
 COPY engine-server/build/libs/engine-server.jar /app/engine-server.jar
-COPY engine-gateway/engine-gateway /app/engine-gateway
-COPY engine-gateway/config.yaml /app/config.yaml
-COPY engine-gateway/static/ /app/static/
-RUN chmod +x /app/engine-gateway
 
-# 对外仅发布网关端口；server(:8081) 只在容器内回环，永不 EXPOSE（spec: 单容器全栈交付）
+# 唯一端口：静态资源 + /api/** + actuator 同源提供（原网关 :8090 契约零变动）
 EXPOSE 8090
 # 有状态数据统一目录（SQLite/上传文档/Lucene 索引），挂卷持久化
 VOLUME /app/data
 
-# 编排器健康探测：探测对外入口 gateway；start-period 给首次模型加载留足时间
+# 编排器健康探测：直连本进程 actuator（路径与原网关透传端点一致，部署脚本零改动）；
+# start-period 给首次模型加载留足时间
 HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --retries=3 \
     CMD curl -sf http://127.0.0.1:8090/actuator/health || exit 1
 
