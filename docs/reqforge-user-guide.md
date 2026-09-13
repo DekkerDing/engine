@@ -1,7 +1,7 @@
 # reqforge — 使用手册
 
 > 面向：运维人员、部署工程师、业务运营人员
-> 版本：1.0 | 日期：2026-09-13
+> 版本：1.2（单 JAR 合体） | 日期：2026-09-13
 
 ---
 
@@ -20,12 +20,13 @@
 
 ## 1. 系统概述
 
-reqforge 是一个**三端协同**系统：
-- **engine-server**（:8081）—— 后端业务核心（Java / Spring Boot）
-- **engine-gateway**（:8090）—— 聚合网关：Web 静态资源 + API 反向代理（Go/net/http 实现）
+reqforge 是一个**双端协同**系统：
+- **engine-server**（:8090，单 JAR 合体）—— 后端业务核心 + Web 静态资源 + API（Java / Spring Boot，一个进程一个端口承载全部）
 - **reqforge_app**（Flutter）—— 移动端 APP
 
-部署模式：所有服务同机部署，网关是唯一对外端口（8090），server 端口（8081）不对外暴露。
+部署模式：所有服务同机部署，:8090 是唯一对外端口（页面与 API 同源提供）。
+
+> v1.2 变更：Go 网关（engine-gateway）已退役，职能并入 engine-server；内部端口 8081 随之消失。对外地址与使用方式完全不变。
 
 ---
 
@@ -40,7 +41,7 @@ reqforge 是一个**三端协同**系统：
 | Python | 3.8+ | `python --version` |
 | Flutter | 3.x | `flutter --version` |
 | 操作系统 | Windows 10+ / Linux | — |
-| 端口 | 8090、8081 未被占用 | `netstat -an \| findstr "8090 8081"` |
+| 端口 | 8090 未被占用 | `netstat -an \| findstr "8090"` |
 
 ---
 
@@ -54,21 +55,11 @@ reqforge 是一个**三端协同**系统：
 # Windows PowerShell 一键构建
 cd F:\workspace\engine
 
-# Step 1: 构建后端（Java）
+# Step 1: 构建单 JAR 合体（前端构建与 python 脚本打包自动拉起，全部进 jar）
 .\gradlew :engine-server:bootJar
 
-# Step 2: 构建前端（React → 静态文件 → 复制到 Go 网关）
-.\gradlew buildFrontend
-.\gradlew copyFrontendDist
-
-# Step 3: 编译 Go 网关
-cd engine-gateway
-go build -o engine-gateway.exe .
-cd ..
-
-# Step 4: 检查产物
+# Step 2: 检查产物
 Get-ChildItem engine-server\build\libs\engine-server.jar
-Get-ChildItem engine-gateway\engine-gateway.exe
 ```
 
 ### 3.2 仅构建后端（改动 Java 代码后）
@@ -80,12 +71,11 @@ Get-ChildItem engine-gateway\engine-gateway.exe
 ### 3.3 仅构建前端（改动 React 代码后）
 
 ```powershell
-cd frontend
+cd engine-server\frontend
 npm run build
-# 构建产物在 dist/ 目录，需复制到 Go 网关
-cd ..
-.\gradlew copyFrontendDist
-# 网关二进制不内嵌静态资源（运行时读 static/ 目录），无需重新 go build
+# 构建产物在 dist/ 目录；发布态需重打 jar 使产物进 BOOT-INF/classes/static/：
+cd ..\..
+.\gradlew :engine-server:bootJar
 ```
 
 ### 3.4 Flutter APP 构建
@@ -101,31 +91,22 @@ flutter build ios --no-codesign  # iOS（需 macOS）
 
 ## 4. 手动部署步骤
 
-### 4.1 后端
+### 4.1 启动合体应用
 
 1. 确保 `engine-server\data\` 目录存在（SQLite 数据库存放位置）
 2. 确保 Python 环境可用（用于文本向量化等）
-3. 启动 server：
+3. 启动（从 engine-server 目录，`./python` 探测命中脚本目录）：
    ```powershell
-   java -jar engine-server\build\libs\engine-server.jar
+   cd engine-server
+   java -jar build\libs\engine-server.jar
    ```
-4. 验证：访问 `http://127.0.0.1:8081/actuator/health` → 返回 `{"status":"UP"}`
+4. 验证：访问 `http://127.0.0.1:8090/actuator/health` → 返回 `{"status":"UP"}`；
+   浏览器打开 `http://127.0.0.1:8090` → 看到仪表盘页面
 
-### 4.2 网关
-
-1. 确保 server 已启动并健康
-2. 启动 gateway：
-   ```powershell
-   cd engine-gateway
-   .\engine-gateway.exe
-   ```
-   （开发模式可使用 `go run .`）
-3. 验证：浏览器打开 `http://127.0.0.1:8090` → 看到仪表盘页面
-
-### 4.3 前端开发模式（热更新）
+### 4.2 前端开发模式（热更新）
 
 ```powershell
-cd engine-gateway\frontend
+cd engine-server\frontend
 npm install
 npm run dev
 # 浏览器打开 http://localhost:5173
@@ -136,12 +117,11 @@ npm run dev
 
 ## 5. 启动与停止
 
-### 启动顺序（必须遵守！）
+### 启动顺序
 
 ```
-1. engine-server (:8081)   ← 先启动
-2. engine-gateway (:8090)   ← server 就绪后再启动
-3. reqforge_app (Flutter)  ← 最后启动（连接 :8090）
+1. engine-server (:8090)   ← 唯一后端进程（含 Python 子进程加载模型 30-60s）
+2. reqforge_app (Flutter)  ← server 就绪后启动（连接 :8090）
 ```
 
 ### 启动脚本
@@ -150,20 +130,20 @@ npm run dev
 
 ```batch
 @echo off
-echo === Starting engine-server ===
-start "engine-server" java -jar engine-server\build\libs\engine-server.jar
-timeout /t 10 /nobreak >nul
-echo === Starting engine-gateway ===
-start "engine-gateway" engine-gateway\engine-gateway.exe
-echo === Done. Gateway at http://127.0.0.1:8090 ===
+echo === Starting engine-server (single-jar) ===
+cd engine-server
+start "engine-server" java -jar build\libs\engine-server.jar
+echo === Done. App at http://127.0.0.1:8090 ===
 pause
 ```
 
 ### 停止
 
 ```powershell
-# 查找并终止 Java 进程
-Get-Process java -ErrorAction SilentlyContinue | Stop-Process -Force
+# 查找并终止 Java 进程（Python 子进程随 Java 的 shutdown hook 连带终止）
+Get-Process java -ErrorAction SilentlyContinue | Stop-Process
+# 强杀（-Force）不走 shutdown hook，可能遗留 Python 孤儿进程：
+# Get-Process python -ErrorAction SilentlyContinue | Stop-Process -Force
 ```
 
 ---
@@ -262,7 +242,6 @@ class ApiConfig {
 ```powershell
 # 检查端口占用
 netstat -ano | findstr "8090"
-netstat -ano | findstr "8081"
 
 # 终止占用进程（替换 PID）
 taskkill /PID <PID> /F
@@ -270,14 +249,14 @@ taskkill /PID <PID> /F
 
 ### 8.2 前端页面空白
 
-1. 检查 Go 网关 static/ 目录是否有前端文件：`ls engine-gateway/static/index.html`
-2. 重新构建并复制：`.\gradlew buildFrontend copyFrontendDist`
-3. 重新编译 Go 网关：`cd engine-gateway; go build -o engine-gateway.exe .`
+1. 确认访问的是 `http://127.0.0.1:8090`（页面与 API 同端口）
+2. jar 内可能缺前端产物（构建时前端任务链被跳过）：重新构建 `.\gradlew :engine-server:bootJar`
+3. 解包验证：`jar tf engine-server\build\libs\engine-server.jar | findstr static` 应见 `BOOT-INF/classes/static/index.html`
 
-### 8.3 API 请求 502/504
+### 8.3 API 请求失败（404/503）
 
-1. 确认 server 是否启动：`curl http://127.0.0.1:8081/actuator/health`
-2. 确认网关配置文件 `engine-gateway/config.yaml` 中 `upstream.base_url` 指向 `http://127.0.0.1:8081`
+1. 确认应用是否启动：`curl http://127.0.0.1:8090/actuator/health`
+2. `/api/xxx` 返回 404 属正常语义（未匹配路径不吞成 HTML）；503 多为 Python 引擎启动中或不可达，等模型加载完成（30-60s）后重试
 
 ### 8.4 附件上传失败
 

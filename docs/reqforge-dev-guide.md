@@ -1,6 +1,6 @@
 # reqforge — 开发手册
 
-> 面向：后端开发、前端开发、Flutter 开发 | 版本：1.1 | 日期：2026-09-13
+> 面向：后端开发、前端开发、Flutter 开发 | 版本：1.3（单 JAR 合体） | 日期：2026-09-13
 
 ---
 
@@ -28,14 +28,10 @@
      │                                     │
      │ HTTP 请求                            │ HTTP 请求
      ▼                                     ▼
-engine-gateway (:8090)  ← Go/net/http 实现
-  ├─ 静态资源托管（React dist/）
-  ├─ /api/** → 剥前缀反代 engine-server (:8081)
-  └─ SPA 回退（非 /api 未命中 → index.html）
-     │
-     │ 127.0.0.1:8081（仅容器内/本机回环）
-     ▼
-engine-server (:8081)
+engine-server (:8090)  ← 单 JAR 合体（唯一进程、唯一端口）
+  ├─ /api/** 业务 API（控制器映射直接带前缀）
+  ├─ 静态资源托管 + SPA 回退（jar 内 BOOT-INF/classes/static/）
+  ├─ actuator/health（容器 HEALTHCHECK 探测口）
   ├─ DDD 四层：interfaces → application → domain ← infrastructure
   ├─ SQLite（engine.db）
   ├─ Lucene 全文索引
@@ -47,14 +43,17 @@ engine-server (:8081)
 
 | 模块 | 技术栈 | 端口 | 职责 |
 |------|--------|------|------|
-| engine-server | Java 8 + Spring Boot + SQLite + Lucene + Py4J | 8081 | 需求 CRUD、渲染规约、工件管理、导出 |
-| engine-gateway | Go 1.22 + net/http（标准库） | 8090 | 静态资源 + API 反代 + 健康聚合 |
-| frontend | React 18 + TypeScript + Ant Design 5 + Vite 5 | — | Web 前端 UI |
+| engine-server | Java 8 + Spring Boot + SQLite + Lucene + Py4J | **8090**（唯一） | 需求 CRUD、渲染规约、工件管理、导出 + 静态资源 + SPA 回退 + 健康聚合 |
+| engine-server/frontend | React 18 + TypeScript + Ant Design 5 + Vite 5 | — | Web 前端 UI（server 的资产，src 之外） |
 | reqforge_app | Flutter 3.x + Dart | — | Android/iOS APP |
 
 > **v1.1 变更**：`engine-gateway` 已由 Java/Spring Boot 替换为 Go/net/http 实现。
 > **v1.2 变更**：旧 Java gateway 源码已移除（保留在 git 历史），`engine-gateway/` 目录
 > 即为 Go 工程；前端源码迁至仓库根 `frontend/`。对外端口、路由、契约完全不变。
+> **v1.3 变更（单 JAR 合体）**：Go 网关退役——职能（静态资源、SPA 回退、缓存头、
+> 健康聚合、/api 前缀）内化为 engine-server 的 `interfaces.web` 三件套与控制器前缀映射；
+> `frontend/` 移入 `engine-server/frontend/`；对外端口、路由、契约完全不变。
+> 详见 [合体设计文档](file:///F:/workspace/engine/docs/reqforge-single-jar-design.md)。
 
 ### 1.3 DDD 分层依赖方向
 
@@ -171,40 +170,28 @@ engine-server/src/main/java/io/github/dekkerding/engine/
     └── core/
 ```
 
-### 2.2 engine-gateway 网关源码结构
+### 2.2 interfaces.web 静态三件套（原网关职能的内化）
+
+Go 网关退役后，其四项职能由 `engine-server` 的 `interfaces.web` 原生承担（对外契约逐字节不变）：
 
 ```
-engine-gateway/
-├── main.go                                   # 入口：路由注册 + HTTP Server 启动
-├── go.mod                                    # Go Module 定义
-├── go.sum                                    # 依赖锁定
-├── config.yaml                               # 网关配置（端口/上游/健康/静态资源）
-├── internal/
-│   ├── config/
-│   │   └── config.go                         # YAML 配置加载（默认值 + 文件覆盖）
-│   ├── model/
-│   │   └── api_response.go                   # 统一信封 {code,message,data,timestamp}
-│   ├── handler/
-│   │   ├── proxy.go                          # /api/** 反向代理（ReverseProxy + 流式透传 + 大小闸门）
-│   │   ├── static.go                         # 静态资源 + SPA 回退（4 分支逻辑）
-│   │   └── health.go                         # /api/system/health 聚合健康 + 周期探测 goroutine
-│   └── middleware/
-│       └── cache.go                          # /assets/** 长缓存头 + no-cache 头
-└── static/                                   # 前端 dist/ 产物（Gradle 构建时复制进来）
-    ├── index.html
-    └── assets/
+engine-server/src/main/java/.../interfaces/web/
+├── WebStaticConfig.java        # 三段 resource handler：/assets/**、/index.html+/favicon.ico
+│                               # （noCache）、/** 兜底挂 SpaFallbackResolver
+├── SpaFallbackResolver.java    # SPA 回退：api/|actuator/ 前缀拒绝→404；目录型→入口页；
+│                               # 文件存在→原样；前端路由→index.html 200
+└── AssetCacheFilter.java       # /assets/* → public, max-age=31536000, immutable
+                                #（手写头——Spring 5.3 无 CacheControl.immutable()）
 ```
 
-**与原 Java 网关的对照关系**（Java 实现已随 Go 替换移除，源码见 git 历史；[设计文档](file:///F:/workspace/engine/docs/reqforge-gateway-go-design.md)）：
+| 原网关组件 | 内化后的 Java 组件 | 契约要点 |
+|-----------|-------------------|----------|
+| `handler/proxy.go`（/api 剥前缀反代） | 控制器类级 `@RequestMapping("/api/...")` | API 全在 `/api/**` 命名空间（D1 终案——Filter 剥前缀与同名前端路由冲突，实测推翻） |
+| `handler/static.go` | `WebStaticConfig` + `SpaFallbackResolver` | 路由表见 [合体规约](file:///F:/workspace/engine/docs/reqforge-single-jar-spec.md) |
+| `middleware/cache.go` | `AssetCacheFilter` | 缓存头策略逐字节一致 |
+| `handler/health.go`（周期探测） | `SystemController` 直调 `SystemQueryService` | 合体信封五段；实时计算替代探测缓存 |
 
-| Java 类 | Go 文件 | 职责 |
-|---------|---------|------|
-| `ProxyController.java` | [handler/proxy.go](file:///F:/workspace/engine/engine-gateway/internal/handler/proxy.go) | API 反代 |
-| `WebStaticConfig.java` + `SpaFallbackResolver.java` | [handler/static.go](file:///F:/workspace/engine/engine-gateway/internal/handler/static.go) | 静态资源 + SPA 回退 |
-| `AssetCacheFilter.java` | [middleware/cache.go](file:///F:/workspace/engine/engine-gateway/internal/middleware/cache.go) | 缓存头 |
-| `HealthController.java` + `UpstreamHealthService.java` | [handler/health.go](file:///F:/workspace/engine/engine-gateway/internal/handler/health.go) | 健康聚合 |
-| `ApiResponse.java` | [model/api_response.go](file:///F:/workspace/engine/engine-gateway/internal/model/api_response.go) | 信封 |
-| [application.yml](file:///F:/workspace/engine/engine-gateway/src/main/resources/application.yml) | [config.yaml](file:///F:/workspace/engine/engine-gateway/config.yaml) | 配置 |
+Go 网关的设计档案见 [历史文档](file:///F:/workspace/engine/docs/reqforge-gateway-go-design.md)（已被合体取代）。
 
 ### 2.3 frontend 前端源码结构
 
@@ -402,8 +389,8 @@ void registerRenderers() {
 2. [RequirementDto.java](file:///F:/workspace/engine/engine-server/src/main/java/io/github/dekkerding/engine/interfaces/rest/dto/RequirementDto.java) — 同步加字段
 3. [RequirementJson.java](file:///F:/workspace/engine/engine-server/src/main/java/io/github/dekkerding/engine/infrastructure/persistence/RequirementJson.java) — 确保 JSON 序列化/反序列化覆盖新字段（使用 Jackson，字段自动映射）
 4. [DatabaseMigrator.java](file:///F:/workspace/engine/engine-server/src/main/java/io/github/dekkerding/engine/infrastructure/persistence/DatabaseMigrator.java) — 如果存的是 JSON 列则无需改表（Schema-less）
-5. 前端 [formFragments.tsx](file:///F:/workspace/engine/frontend/src/pages/requirements/formFragments.tsx) — 加表单输入项
-6. 前端 [types.ts](file:///F:/workspace/engine/frontend/src/api/types.ts) — 同步 TS 类型
+5. 前端 [formFragments.tsx](file:///F:/workspace/engine/engine-server/frontend/src/pages/requirements/formFragments.tsx) — 加表单输入项
+6. 前端 [types.ts](file:///F:/workspace/engine/engine-server/frontend/src/api/types.ts) — 同步 TS 类型
 7. APP 端 models 和 pages 同步
 
 ### 3.6 后端开发规范速查
@@ -425,16 +412,16 @@ void registerRenderers() {
 
 | 文件 | 职责 | 修改时机 |
 |------|------|----------|
-| [api/requirements.ts](file:///F:/workspace/engine/frontend/src/api/requirements.ts) | 需求 API 调用方法 | 新增后端接口时 |
-| [api/types.ts](file:///F:/workspace/engine/frontend/src/api/types.ts) | TypeScript 类型定义 | 后端 DTO 变更时 |
-| [api/client.ts](file:///F:/workspace/engine/frontend/src/api/client.ts) | axios 实例、拦截器 | 改全局请求行为时 |
-| [App.tsx](file:///F:/workspace/engine/frontend/src/App.tsx) | 路由定义 | 新增页面时 |
-| [layouts/AppLayout.tsx](file:///F:/workspace/engine/frontend/src/layouts/AppLayout.tsx) | 全局布局 | 改导航菜单时 |
-| [pages/requirements/RequirementListPage.tsx](file:///F:/workspace/engine/frontend/src/pages/requirements/RequirementListPage.tsx) | 需求列表 | 改列表功能时 |
-| [pages/requirements/RequirementFormPage.tsx](file:///F:/workspace/engine/frontend/src/pages/requirements/RequirementFormPage.tsx) | 三步表单 | 改表单步骤时 |
-| [pages/requirements/RequirementWorkshopPage.tsx](file:///F:/workspace/engine/frontend/src/pages/requirements/RequirementWorkshopPage.tsx) | 需求工坊 | 改工坊功能时 |
-| [pages/requirements/RequirementExportPage.tsx](file:///F:/workspace/engine/frontend/src/pages/requirements/RequirementExportPage.tsx) | 导出页 | 改导出功能时 |
-| [pages/requirements/formFragments.tsx](file:///F:/workspace/engine/frontend/src/pages/requirements/formFragments.tsx) | 表单子组件 | 改表单字段时 |
+| [api/requirements.ts](file:///F:/workspace/engine/engine-server/frontend/src/api/requirements.ts) | 需求 API 调用方法 | 新增后端接口时 |
+| [api/types.ts](file:///F:/workspace/engine/engine-server/frontend/src/api/types.ts) | TypeScript 类型定义 | 后端 DTO 变更时 |
+| [api/client.ts](file:///F:/workspace/engine/engine-server/frontend/src/api/client.ts) | axios 实例、拦截器 | 改全局请求行为时 |
+| [App.tsx](file:///F:/workspace/engine/engine-server/frontend/src/App.tsx) | 路由定义 | 新增页面时 |
+| [layouts/AppLayout.tsx](file:///F:/workspace/engine/engine-server/frontend/src/layouts/AppLayout.tsx) | 全局布局 | 改导航菜单时 |
+| [pages/requirements/RequirementListPage.tsx](file:///F:/workspace/engine/engine-server/frontend/src/pages/requirements/RequirementListPage.tsx) | 需求列表 | 改列表功能时 |
+| [pages/requirements/RequirementFormPage.tsx](file:///F:/workspace/engine/engine-server/frontend/src/pages/requirements/RequirementFormPage.tsx) | 三步表单 | 改表单步骤时 |
+| [pages/requirements/RequirementWorkshopPage.tsx](file:///F:/workspace/engine/engine-server/frontend/src/pages/requirements/RequirementWorkshopPage.tsx) | 需求工坊 | 改工坊功能时 |
+| [pages/requirements/RequirementExportPage.tsx](file:///F:/workspace/engine/engine-server/frontend/src/pages/requirements/RequirementExportPage.tsx) | 导出页 | 改导出功能时 |
+| [pages/requirements/formFragments.tsx](file:///F:/workspace/engine/engine-server/frontend/src/pages/requirements/formFragments.tsx) | 表单子组件 | 改表单字段时 |
 
 ### 4.2 新增前端页面标准流程
 
@@ -565,7 +552,7 @@ class ApiConfig {
 
 | 约定 | 说明 |
 |------|------|
-| 基础路径 | `/api`（gateway 路由前缀，server 侧无此前缀） |
+| 基础路径 | `/api`（控制器映射前缀，D1 终案——前端路由与 API 命名空间物理隔离） |
 | 请求格式 | JSON（Content-Type: application/json） |
 | 响应格式 | `{"code": 0, "message": "ok", "data": {...}}` |
 | 错误码分段 | 0=成功，1xxx=参数错误，2xxx=领域错误，3xxx=下游错误，5xxx=系统错误 |
@@ -821,13 +808,14 @@ Response 400:
 
 ## 7. 启动与运行
 
-### 7.1 启动顺序（必须遵守）
+### 7.1 启动顺序
 
 ```
-1. engine-server (:8081)   ← 必须先启动（含 Python 子进程加载模型 30-60s）
-2. engine-gateway (:8090)  ← server 就绪后启动
-3. reqforge_app (Flutter)  ← 最后启动
+1. engine-server (:8090)   ← 唯一后端进程（含 Python 子进程加载模型 30-60s）
+2. reqforge_app (Flutter)  ← server 就绪后启动
 ```
+
+> v1.3 单 JAR 合体后只有一个后端进程——网关已退役，无启动顺序约束。
 
 ### 7.2 engine-server 启动
 
@@ -849,52 +837,22 @@ Py4J 通道就绪 (127.0.0.1:25335)
 **Jar 包启动**：
 
 ```powershell
-java -jar engine-server\build\libs\engine-server.jar
+# 从 engine-server/ 目录启动（./python 探测命中脚本目录）
+cd engine-server
+java -jar build\libs\engine-server.jar
+
+# 或从仓库根显式指定脚本目录
+java -jar engine-server\build\libs\engine-server.jar --engine.python.home=engine-server\python
 ```
 
-### 7.3 engine-gateway 启动
-
-**直接运行（无需 Java/Gradle）**：
+### 7.3 前端热更新开发模式（推荐前端开发使用）
 
 ```powershell
-# 1. 确保前端产物已复制到 static/ 目录
-.\gradlew copyFrontendDist
-
-# 2. 编译并启动 Go 网关
-cd engine-gateway
-go build -o engine-gateway.exe .
-.\engine-gateway.exe
-```
-
-**或一步启动（开发模式）**：
-
-```powershell
-cd engine-gateway
-go run .
-```
-
-**指定配置文件**：
-
-```powershell
-.\engine-gateway.exe -config custom.yaml
-```
-
-启动日志关键行：
-```
-engine-gateway starting on :8090
-upstream: http://127.0.0.1:8081
-static dir: ./static
-```
-
-**前端热更新开发模式**（推荐前端开发使用）：
-
-```powershell
-# 终端 1：启动 Go 网关（提供 API 代理 + 端口）
-cd engine-gateway
-go run .
+# 终端 1：启动合体应用（:8090，提供 API + 静态资源）
+.\gradlew :engine-server:bootRun
 
 # 终端 2：启动 Vite dev server（热更新）
-cd engine-gateway\frontend
+cd engine-server\frontend
 npm install
 npm run dev     # 浏览器打开 http://localhost:5173
                 # /api 请求自动代理到 http://127.0.0.1:8090
@@ -919,13 +877,13 @@ flutter run -d chrome           # Web 调试
 ### 7.5 验证健康
 
 ```powershell
-# 验证 server
-curl http://127.0.0.1:8081/actuator/health
+# 容器/编排器探测口
+curl http://127.0.0.1:8090/actuator/health
 # → {"status":"UP"}
 
-# 验证 gateway
+# 合体信封（整体 + engine/documents 明细）
 curl http://127.0.0.1:8090/api/system/health
-# → 三组件状态
+# → {status, gateway, server, engine, documents}
 
 # 浏览器打开
 # 生产：http://127.0.0.1:8090
@@ -936,33 +894,24 @@ curl http://127.0.0.1:8090/api/system/health
 
 ## 8. 打包与部署
 
-### 8.1 后端打包
+### 8.1 后端打包（单 JAR 合体）
 
 ```powershell
-# 在 F:\workspace\engine 根目录执行
-
-# 打包 server
+# 在 F:\workspace\engine 根目录执行——一条命令出全部
 .\gradlew :engine-server:bootJar
+# 前端构建（npmInstall → buildFrontend → copyFrontendDist）与
+# python 脚本打包（packagePython）被自动拉起，产物全部进 jar：
 # 产物：engine-server/build/libs/engine-server.jar
-
-# 构建前端 + 复制到 Go 网关 static/ 目录
-.\gradlew buildFrontend
-.\gradlew copyFrontendDist
-
-# 编译 Go 网关
-cd engine-gateway
-go build -o engine-gateway.exe .
-# 产物：engine-gateway/engine-gateway.exe
-
-# 跨平台编译（线上为 Linux 时）
-$env:GOOS="linux"; $env:GOARCH="amd64"; go build -o engine-gateway .
-# 产物：engine-gateway/engine-gateway (ELF binary)
+#   ├─ BOOT-INF/classes/static/    ← 前端构建产物
+#   └─ BOOT-INF/classes/python/    ← Python 脚本资产
 ```
+
+镜像构建与部署详见 [deployment.md](file:///F:/workspace/engine/docs/deployment.md)。
 
 ### 8.2 前端单独构建
 
 ```powershell
-cd engine-gateway\frontend
+cd engine-server\frontend
 npm run build
 # 产物：dist/ 目录
 
@@ -992,29 +941,18 @@ flutter build ios --no-codesign
 # ===== 全量构建脚本 (build-all.ps1) =====
 $ErrorActionPreference = "Stop"
 
-Write-Host "=== 1/4 构建 engine-server ==="
+Write-Host "=== 1/3 构建 engine-server（单 JAR，前端自动入 jar） ==="
 .\gradlew :engine-server:bootJar
 if ($LASTEXITCODE -ne 0) { throw "server 构建失败" }
 
-Write-Host "=== 2/4 构建前端 ==="
-.\gradlew buildFrontend
-if ($LASTEXITCODE -ne 0) { throw "前端构建失败" }
-
-Write-Host "=== 3/4 构建 engine-gateway ==="
-.\gradlew copyFrontendDist
-cd engine-gateway
-go build -o engine-gateway.exe .
-if ($LASTEXITCODE -ne 0) { throw "Gateway 构建失败" }
-cd ..
-
-Write-Host "=== 4/4 构建 Flutter APP ==="
+Write-Host "=== 2/3 构建 Flutter APP ==="
 cd F:\workspace\reqforge_app
 flutter build apk --debug
 if ($LASTEXITCODE -ne 0) { throw "APP 构建失败" }
+cd F:\workspace\engine
 
-Write-Host "=== 全部构建完成 ==="
-Write-Host "后端: engine-server/build/libs/engine-server.jar"
-Write-Host "网关: engine-gateway/engine-gateway.exe"
+Write-Host "=== 3/3 完成 ==="
+Write-Host "后端: engine-server/build/libs/engine-server.jar（含前端产物与 python 脚本）"
 Write-Host "APP:  build/app/outputs/flutter-apk/app-debug.apk"
 ```
 
@@ -1049,7 +987,7 @@ Write-Host "APP:  build/app/outputs/flutter-apk/app-debug.apk"
    domain 单测 → application 假端口测试 → REST 集成测试
       ↓
 4. 本地验证：
-   server bootRun → gateway bootRun → 浏览器操作一遍
+   .\gradlew :engine-server:bootRun → 浏览器操作一遍
       ↓
 5. 前端适配：
    api/types.ts 同步类型 → api/ 加方法 → pages/ 加 UI
@@ -1058,9 +996,7 @@ Write-Host "APP:  build/app/outputs/flutter-apk/app-debug.apk"
    models/ 同步 → services/ 加方法 → pages/ 加 UI
       ↓
 7. 全量构建验证：
-   .\gradlew :engine-server:bootJar
-   cd frontend && npm run build
-   cd engine-gateway && go build -o engine-gateway.exe .
+   .\gradlew :engine-server:bootJar   ← 单 JAR（前端构建自动拉起）
    flutter build apk --debug
       ↓
 8. 提交代码 + 运行全量测试
@@ -1113,7 +1049,7 @@ java -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=5005 -jar ...
 
 **Q: `npm run dev` 报 proxy error**
 
-A: 确保 `engine-gateway` 已启动（:8090）。Vite dev server 的 `/api` 代理依赖 gateway。
+A: 确保 engine-server 已启动（`.\gradlew :engine-server:bootRun`，:8090）。Vite dev server 的 `/api` 代理依赖它。
 
 **Q: 改完代码页面没更新**
 
@@ -1134,7 +1070,7 @@ A: `npx tsc --noEmit` 检查所有类型错误。务必在提交前修复——�
 A: 检查 `lib/config/api_config.dart` 的 `baseUrl`：
 - 模拟器用 `http://10.0.2.2:8090/api`
 - 真机同 WiFi 用电脑 IP，如 `http://192.168.1.100:8090/api`
-- 确保 gateway 已启动且端口可访问
+- 确保 engine-server 已启动且 :8090 端口可访问
 
 **Q: `flutter run` 找不到设备**
 
@@ -1162,23 +1098,16 @@ A: `flutter clean` → `flutter pub get` → 重新构建。确保 Android SDK �
 ## 附录 B：快速命令速查
 
 ```powershell
-# ===== 后端 =====
-.\gradlew :engine-server:bootRun          # 启动 server（开发）
-.\gradlew :engine-server:bootJar          # 打包 server
+# ===== 后端（单 JAR 合体） =====
+.\gradlew :engine-server:bootRun          # 启动合体应用（开发，:8090）
+.\gradlew :engine-server:bootJar          # 打包单 JAR（前端构建自动拉起）
 .\gradlew :engine-server:test             # 运行全部测试
 .\gradlew :engine-server:test --tests "*RequirementControllerTest"  # 单个测试
 
-# ===== 网关（Go 工程，gradle 只编排前端构建） =====
-.\gradlew buildFrontend       # 构建前端
-.\gradlew copyFrontendDist    # 复制前端产物到 engine-gateway/static/
-cd engine-gateway
-go run .                          # 启动 gateway（开发）
-go build -o engine-gateway.exe .  # 编译 gateway 二进制
-
 # ===== 前端 =====
-cd frontend
+cd engine-server\frontend
 npm install                               # 安装依赖
-npm run dev                               # 启动 Vite 热更新
+npm run dev                               # 启动 Vite 热更新（/api → :8090）
 npm run build                             # 生产构建
 npx tsc --noEmit                          # 类型检查
 
@@ -1190,6 +1119,6 @@ flutter build apk --debug                 # 打包 Android
 flutter analyze                           # 静态分析
 
 # ===== 验证 =====
-curl http://127.0.0.1:8081/actuator/health     # server 健康
-curl http://127.0.0.1:8090/api/system/health    # gateway 健康
+curl http://127.0.0.1:8090/actuator/health     # 容器探测口
+curl http://127.0.0.1:8090/api/system/health   # 合体信封（整体 + engine/documents）
 ```
