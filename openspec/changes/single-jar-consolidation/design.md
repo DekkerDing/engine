@@ -73,7 +73,7 @@ gateway 段  = {application:"engine-gateway", status:"UP"}   ← 保留段名兼
 两件事一次做：
 
 1. **目录归属**：`frontend/`（仓库根）→ `engine-server/frontend/`，对齐 `engine-server/python/` 的既有先例——「模块资产、src 外、谁用它在谁家」（`engine-server/build.gradle:70-71` 原注释）。三个嵌套服务归并为同一种归属模式，仓库根不再有独立前端工程。当初选「仓库根」的语境是产物要送 `engine-gateway/static/`，该前提已随网关退役消失。
-2. **任务链**：`npmInstall`（fingerprint 跳过）→ `buildFrontend` → `copyFrontendDist`（clean-first 直送 `src/main/resources/static/`）迁入 `engine-server/build.gradle`，`bootJar` 自动内嵌为 `classpath:/static/`；根 `build.gradle` 移除前端任务。
+2. **任务链**：`npmInstall`（fingerprint 跳过）→ `buildFrontend` → `copyFrontendDist` 迁入 `engine-server/build.gradle`。产物走 **build/ 中转**（`build/frontend-static/static/` → sourceSets 注册 → jar 内 `classpath:/static/`）而非直送 `src/main/resources/static/`——实现时对齐 `packagePython` 的既有先例（其注释明确「产物放 build/ 而非 src——避免污染源码树」），jar 内路径与行为契约不变；根 `build.gradle` 移除前端任务。
 
 `frontendDir` 路径引用面（全部随本决策同步）：根 `build.gradle:60`（任务迁走时重写）、`.gitignore:30`、`.dockerignore:30`、`settings.gradle:15`（结构注释）；Dockerfile.full 经 Gradle 任务间接引用，无硬编码路径。
 

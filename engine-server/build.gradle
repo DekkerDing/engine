@@ -94,6 +94,85 @@ bootJar {
 }
 
 // ============================================================
+// 前端构建任务链：frontend/(npm 工程) 产物随 jar 一起部署
+// ------------------------------------------------------------
+// 【设计意图】与 packagePython 同一模式——"模块资产、src 外、随 jar 提供"：
+// frontend/ 维护在本模块内（engine-server/frontend），构建产物直送 jar 的
+// classpath:/static/，由 interfaces/web 三件套（WebStaticConfig 等）服务。
+// 数据流：frontend/ → npm run build → dist/ --Copy--> build/frontend-static/static/
+//        → sourceSets 注册 → jar 内 BOOT-INF/classes/static/
+// 【注意】与 packagePython 一致，产物放 build/ 中转而非 src/main/resources——
+// 避免把构建产物拷进源码树污染 git（clean 即还原）。
+// 用法：gradlew :engine-server:buildFrontend（copyFrontendDist 随 processResources 联动）
+// ------------------------------------------------------------
+// 【Groovy 大坑】脚本级 def 局部变量在"任务闭包内"不可见（按项目属性解析后抛
+// MissingPropertyException）——路径用 def 只在配置处使用，闭包内一律 ext 属性。
+// ============================================================
+ext.frontendDir = file("${projectDir}/frontend")
+ext.frontendHashFile = new File(project.buildDir, '.frontend-build-hash')
+// npm 调用命令平台无关化：Windows 下 npm 是 npm.cmd，必须经 cmd /c 才能被
+// ProcessBuilder/Exec 直接执行；Linux（Dockerfile.full 全构建轨容器内）直接
+// 调 npm 即可——硬编码 cmd 会让容器内构建直接失败
+ext.npmCommandLine = { String... args ->
+    def isWindows = System.getProperty('os.name').toLowerCase().contains('windows')
+    isWindows ? ['cmd', '/c', 'npm'] + args.toList() : ['npm'] + args.toList()
+}
+
+task npmInstall(type: Exec) {
+    group = 'frontend'
+    description = '安装前端依赖（node_modules 缺失时才执行）'
+    onlyIf { frontendDir.exists() && !new File(frontendDir, 'node_modules').exists() }
+    workingDir frontendDir
+    commandLine npmCommandLine('install')
+}
+
+// 计算前端源码指纹：没变化就跳过重新构建（避免每次 build 都跑 npm）
+def frontendFingerprint() {
+    if (!frontendDir.exists()) return null
+    def files = fileTree(frontendDir) {
+        include 'src/**', 'public/**', 'package.json', 'vite.config.ts', 'tsconfig.json'
+        exclude 'node_modules/**', 'dist/**'
+    }
+    def source = files.files.collect { it.path + ':' + it.lastModified() }.join('\n')
+    def digest = java.security.MessageDigest.getInstance('SHA-256')
+    digest.digest(source.getBytes('UTF-8')).encodeHex().toString()
+}
+
+task buildFrontend(type: Exec) {
+    group = 'frontend'
+    description = '构建前端工程（源码指纹变化时才执行）'
+    onlyIf {
+        def fp = frontendFingerprint()
+        frontendDir.exists() && (!frontendHashFile.exists() || frontendHashFile.text != fp)
+    }
+    dependsOn npmInstall
+    workingDir frontendDir
+    commandLine npmCommandLine('run', 'build')
+    doLast {
+        def fp = frontendFingerprint()
+        if (fp != null) {
+            frontendHashFile.parentFile.mkdirs()
+            frontendHashFile.text = fp
+        }
+    }
+}
+
+task copyFrontendDist(type: Copy) {
+    group = 'frontend'
+    description = '把前端产物复制进 jar 资源目录（classpath:/static/，clean-first）'
+    onlyIf { new File(frontendDir, 'dist').exists() }
+    dependsOn buildFrontend
+    // 先清空目标再拷贝：旧哈希资产不残留（与"jar 每次重打"的新鲜度语义一致）
+    doFirst { delete layout.buildDirectory.dir('frontend-static') }
+    from "${frontendDir}/dist"
+    into layout.buildDirectory.dir('frontend-static/static')
+}
+
+// 把 build/frontend-static 注册为资源目录，processResources 时一并打入 jar
+sourceSets.main.resources.srcDir layout.buildDirectory.dir('frontend-static')
+processResources.dependsOn copyFrontendDist
+
+// ============================================================
 // channelIT — 双通道集成测试（拉真实 Python 子进程）
 // 用法: gradlew :engine-server:channelIT
 // 【教学注释 · JavaExec】在 Gradle 里直接跑一个带 classpath 的 main 方法，

@@ -20,8 +20,9 @@
 
 ## [W1] 2. 前端工程移入 engine-server 并迁移构建编排 —— 与组 1 并行
 
-- [ ] 2.1 `git mv frontend engine-server/frontend`（tracked 文件）+ 手动移动/删除 `node_modules/`（untracked，fingerprint 失效后 npmInstall 自动补装），验证 `engine-server/frontend/` 就位且仓库根无残留 frontend 目录后 commit（锚点 2.1）
-- [ ] 2.2 将 `npmInstall`/`buildFrontend`/`copyFrontendDist` 任务链迁入 `engine-server/build.gradle`（frontendDir 指向模块内新位置），产物直送 `src/main/resources/static/`（clean-first + fingerprint 跳过保留），验证 `gradlew :engine-server:buildFrontend :engine-server:copyFrontendDist` 后 static/ 出现 index.html 与 assets/，commit（锚点 2.2）
+- [x] 2.1 `git mv frontend engine-server/frontend`（tracked 文件）+ 手动移动/删除 `node_modules/`（untracked，fingerprint 失效后 npmInstall 自动补装），验证 `engine-server/frontend/` 就位且仓库根无残留 frontend 目录后 commit（锚点 2.1）
+- [x] 2.2 将 `npmInstall`/`buildFrontend`/`copyFrontendDist` 任务链迁入 `engine-server/build.gradle`（frontendDir 指向模块内新位置），产物直送 `src/main/resources/static/`（clean-first + fingerprint 跳过保留），验证 `gradlew :engine-server:buildFrontend :engine-server:copyFrontendDist` 后 static/ 出现 index.html 与 assets/，commit（锚点 2.2）
+  - 实现细节修正：产物改走 `build/frontend-static/static/`（sourceSets 注册）而非直送 `src/main/resources/static/`——对齐 packagePython「build/ 中转不污染源码树」先例，jar 内路径不变（design.md D5 已同步）
 - [ ] 2.3 根 `build.gradle` 移除前端任务与 gatewayStaticDir 引用；`.gitignore`/`.dockerignore` 的 `frontend/dist/` 改为 `engine-server/frontend/dist/`；`settings.gradle:15` 结构注释更新，验证 `gradlew tasks` 无悬空任务、全仓库 grep 无 `rootDir}/frontend` 旧路径后 commit（锚点 2.3）
 - [ ] 2.4 `gradlew :engine-server:bootJar` 后解包验证 `BOOT-INF/classes/static/index.html` 与 `assets/` 存在（jar 自包含），并 `java -jar` 冒烟 8081 全路由，commit（锚点 2.4）
 
