@@ -44,10 +44,14 @@
 
 ## [W3] 5. Docker 与 Jenkinsfile —— 与组 4、6 并行编辑；docker build 验证须待 4.1 完成
 
-- [ ] 5.1 `docker/Dockerfile`：移除 gateway 二进制/static/config.yaml COPY，仅 COPY engine-server fat jar，验证语法（hadolint 或 docker build 本地轨）后 commit（锚点 5.1）
-- [ ] 5.2 `docker/Dockerfile.full`：builder 阶段移除 golang:1.23-alpine 工具链，改为 Node(前端) + JDK8(bootJar)，验证多阶段构建日志后 commit（锚点 5.2）
-- [ ] 5.3 `docker/entrypoint.sh`：单 java 进程启动（exec java），移除 GATEWAY_BIN/双进程互守逻辑，保留 trap TERM 转发，验证 SIGTERM 下 Python 子进程连带退出后 commit（锚点 5.3）
-- [ ] 5.4 HEALTHCHECK 确认指 `:8090/actuator/health`（路径与原网关兼容端点一致，部署脚本零改动），验证镜像内 curl 200 后 commit（锚点 5.4）
+- [x] 5.1 `docker/Dockerfile`：移除 gateway 二进制/static/config.yaml COPY，仅 COPY engine-server fat jar，验证语法（hadolint 或 docker build 本地轨）后 commit（锚点 5.1）
+  - 实测：gateway COPY 三行全删；**补齐既有缺口**——launcher 按文件系统探测 python 脚本目录（jar 内 BOOT-INF 资源不参与探测，注释里的 PythonBootstrap 解压从未实现），新增 `COPY engine-server/python/ /app/python/`（旧架构容器内 Python 通道实际从未可用）；本机无 docker/hadolint，docker build 实测列入 7.2 遗留项
+- [x] 5.2 `docker/Dockerfile.full`：builder 阶段移除 golang:1.23-alpine 工具链，改为 Node(前端) + JDK8(bootJar)，验证多阶段构建日志后 commit（锚点 5.2）
+  - 实测：golang 段与 GOPROXY 全删（Node 22 保留）；构建命令简化为 `./gradlew :engine-server:bootJar --no-daemon -x test`（bootJar → processResources → packagePython + copyFrontendDist 全链自动拉起，build.gradle:90/173 依据）；stage2 与本地轨同步 COPY python/ 并补 `ENV HF_HOME` 两轨对齐；多阶段构建日志无 docker 列入 7.2
+- [x] 5.3 `docker/entrypoint.sh`：单 java 进程启动（exec java），移除 GATEWAY_BIN/双进程互守逻辑，保留 trap TERM 转发，验证 SIGTERM 下 Python 子进程连带退出后 commit（锚点 5.3）
+  - 实测：bash -n 语法过；**实现修正**——exec 后 shell 被 JVM 替换，trap 无宿主；优雅停机语义改为 JVM 直收 SIGTERM（PID 1 下 shutdown hooks 正常响应 → PythonProcessLauncher.stop() 连带终止 Python 子进程，退出码透传容器），注释中记录此决策；容器内 SIGTERM 实测列入 7.2
+- [x] 5.4 HEALTHCHECK 确认指 `:8090/actuator/health`（路径与原网关兼容端点一致，部署脚本零改动），验证镜像内 curl 200 后 commit（锚点 5.4）
+  - 实测：两轨 Dockerfile HEALTHCHECK 均保持 `curl -sf http://127.0.0.1:8090/actuator/health`；本机运行中实例实测 HTTP 200；镜像内验证随 7.2 遗留项（无 docker）
 - [ ] 5.5 新增声明式 `Jenkinsfile`（Frontend → Test → Package → Image → Publish，镜像 tag 含 BUILD_NUMBER），验证语法 `jenkins-cli declarative-linter` 或人工评审后 commit（锚点 5.5）
 
 ## [W3] 6. /docs 手册更新 —— 与组 4、5 并行；本组内 7 篇互不相交可并行起草，各篇独立 commit（写一点提交一点）
