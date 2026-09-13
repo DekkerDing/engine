@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"runtime"
 	"sync"
 
 	"engine/gotoolbox/internal/protocol"
@@ -42,8 +43,16 @@ func NewServer(r *router.Router) *Server {
 	return &Server{router: r}
 }
 
-// Run 阻塞跑主循环，stdin EOF 正常返回（1.3 追加 sys.shutdown 退出路径）。
+// Run 阻塞跑主循环。退出路径有二：stdin EOF（对端关闭）或 sys.shutdown
+// （优雅谢幕帧——先回 bye 响应再退出，退出码恒 0）。
 func (s *Server) Run() error {
+	// 启动横幅：版本 / 平台 / 并行度，打 stderr（stdout 是协议专线）。
+	// 【教学注释 · runtime 包】GOOS/GOARCH 是编译期钉死的平台常量，
+	// NumCPU() 是运行时探测——对应 Java 的 os.name/os.arch 与
+	// Runtime.getRuntime().availableProcessors()。
+	fmt.Fprintf(os.Stderr, "[toolbox] 启动 version=%s platform=%s/%s gomaxprocs=%d\n",
+		Version, runtime.GOOS, runtime.GOARCH, runtime.NumCPU())
+
 	in := bufio.NewScanner(os.Stdin)
 	in.Buffer(make([]byte, 64*1024), maxFrameBytes)
 
@@ -64,6 +73,15 @@ func (s *Server) Run() error {
 			s.write(out, protocol.NewError(0, protocol.CodeInvalidParams,
 				fmt.Sprintf("帧解析失败: %v", err)))
 			continue
+		}
+
+		// sys.shutdown 特判：不进注册表——"让循环退出"是主循环自己的
+		// 权限，handler 只能算业务方法（回调无法触达 Run 的控制流，
+		// 这与 Java 里 listener 停不掉事件循环是同一条边界）。
+		if req.Method == "sys.shutdown" {
+			s.write(out, protocol.NewResult(req.ID, map[string]string{"status": "bye"}))
+			fmt.Fprintf(os.Stderr, "[toolbox] 收到 sys.shutdown，优雅退出\n")
+			return nil
 		}
 
 		// 未知方法由 Router 返回 1001 错误帧，进程继续服务
