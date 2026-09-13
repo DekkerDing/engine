@@ -26,6 +26,7 @@ import (
 	"sort"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 // ============================================================================
@@ -128,27 +129,32 @@ func (c *Chunker) Chunk(documentID string, text string) []Chunk {
 	}
 
 	// 第二步：句子对齐滑动窗口
-	chunkIdx := 0
 	start := 0 // 当前块的起始句子下标
 
 	for start < len(sentences) {
 		var builder strings.Builder // 等价于 Java 的 StringBuilder（零分配优化）
 		end := start
+		runeLen := 0 // 累计字符数（对拍 Java 的 String.length() 口径）
 
 		// 顺序攒句子直到累计长度 ≥ targetSize
+		// 【教学注释 · 判长口径决定对拍成败】
+		//   Java String.length() 数的是 UTF-16 单元（BMP 内 = 字符数）；
+		//   Go len(string) 数的是 byte（中文一字 3 byte）——直接用会让中文块
+		//   比 Java 小三分之二。utf8.RuneCountInString 才是 Java 语义的对齐物。
 		for end < len(sentences) {
 			sentence := sentences[end]
+			sentenceLen := utf8.RuneCountInString(sentence)
 			// 如果当前块已有内容且加这句就超长 → 收口
-			if builder.Len() > 0 && builder.Len()+len(sentence) > c.targetSize {
+			if runeLen > 0 && runeLen+sentenceLen > c.targetSize {
 				break
 			}
 			builder.WriteString(sentence)
+			runeLen += sentenceLen
 			end++
 		}
 
-		// 写入当前块（兜底硬切超长单句）
-		c.appendChunk(&result, documentID, chunkIdx, builder.String())
-		chunkIdx++
+		// 写入当前块（兜底硬切超长单句）——块序号由 appendChunk 按 len(result) 自增
+		c.appendChunk(&result, documentID, builder.String())
 
 		if end >= len(sentences) {
 			break // 已到末尾
@@ -207,24 +213,27 @@ func (c *Chunker) splitSentences(text string) []string {
 
 // appendChunk 硬切超长单句——防止无标点长文绕过长度限制。
 //
+// 【教学注释 · rune 感知硬切（spec 中文正确性硬约束）】
+//   text[from:to] 是按 byte 索引的切片——中文一个字符占 3 字节，
+//   byte 边界可能正好切在 UTF-8 序列中间，切出乱码（U+FFFD）。
+//   正确做法：先 []rune(text) 转码点切片，按 rune 数切块再转回 string。
+//   转换有一次 O(n) 分配，但硬切只发生在"无标点超长句"的兜底分支，
+//   正常句子对齐路径根本走不到这里——正确性优先于罕见路径的性能近似
+//   （原 byte 切版自认"合理近似"，D10 合并裁决按 spec 硬约束修正）。
+//
 // 【教学注释 · Go 的切片追加 append】
 //   append 在容量够用时原地修改，容量不够时分配新底层数组——
 //   所以必须接收返回值（*result = append(*result, ...)）。
 //   忘记接收 append 的返回值是 Go 新手的头号 bug。
-func (c *Chunker) appendChunk(result *[]Chunk, docID string, chunkIdx int, text string) {
+func (c *Chunker) appendChunk(result *[]Chunk, docID string, text string) {
+	runes := []rune(text)
 	from := 0
-	for from < len(text) {
-		// 【教学注释 · Go 的 rune 切片 vs byte 切片】
-		//   text[from:to] 是按 byte 索引的切片——对中文可能切在 UTF-8 中间！
-		//   这里按字符数切块，to 是 byte 偏移量，text[from:to] 可能切出乱码。
-		//   → 正确做法：用 []rune(text) 转成 rune 切片再切，代码见下面的注释。
-		//   但为了性能（大文本转 rune 很贵），这里假设语义块长度远小于文本总长，
-		//   用 byte 切片 + 简单截断是合理的近似。
+	for from < len(runes) {
 		to := from + c.targetSize
-		if to > len(text) {
-			to = len(text)
+		if to > len(runes) {
+			to = len(runes)
 		}
-		piece := strings.TrimSpace(text[from:to])
+		piece := strings.TrimSpace(string(runes[from:to]))
 		if piece != "" {
 			*result = append(*result, Chunk{
 				DocumentID: docID,
@@ -272,6 +281,12 @@ func (c *Chunker) Tokenize(text string, mode string) []string {
 // 【教学注释 · Go 切片的"滑动窗口"惯用手法】
 //   for i := 0; i < len(slice)-1; i++ { pair := slice[i] + slice[i+1] }
 //   这是最简单的"两两相邻"模式——不需要额外库，一行 for 循环就够。
+//
+// 【教学注释 · 这里绝不能去重（曾埋过的坑）】
+//   初版在此处 uniqueStrings 去重——Keywords 拿到去重后的列表统计词频，
+//   所有词频恒为 1，TF 排序彻底失效（"频次统计"名存实亡）。
+//   search 模式按 spec 语义也不去重（去重是 exact 模式的对比特征）；
+//   重复的 bigram 正是 TF 的信息来源。
 func bigrams(tokens []string) []string {
 	if len(tokens) < 2 {
 		return tokens
@@ -280,7 +295,7 @@ func bigrams(tokens []string) []string {
 	for i := 0; i < len(tokens)-1; i++ {
 		result = append(result, tokens[i]+tokens[i+1])
 	}
-	return uniqueStrings(result) // bigram 去重（"公园"可能出现多次）
+	return result
 }
 
 // tokenizeSimple 按字/词粒度切分：中文字符逐字切，英文按词切。
