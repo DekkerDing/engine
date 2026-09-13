@@ -173,6 +173,137 @@ sourceSets.main.resources.srcDir layout.buildDirectory.dir('frontend-static')
 processResources.dependsOn copyFrontendDist
 
 // ============================================================
+// Go 工具箱构建任务链：golang/（Go 工程）交叉编译产物随 jar 一起部署
+// ------------------------------------------------------------
+// 【设计意图】与 packagePython / copyFrontendDist 同一模式——"模块资产、src 外、
+// 随 jar 提供"：golang/ 维护在本模块内（engine-server/golang），双平台二进制
+// 直送 jar 的 classpath:/golang/<platform>/，运行时 GoProcessLauncher 从
+// classpath 解压到 ./go-runtime/<platform>/ 再拉起子进程（定位链生产轨）。
+// 数据流：golang/ 源码 --go build(GOOS 交叉)--> build/golang-bin/<platform>/
+//        --Copy--> build/golang-pack/golang/<platform>/ --> jar 内
+//        BOOT-INF/classes/golang/<platform>/toolbox(.exe)
+// 【交叉编译】纯 Go 零 cgo（CGO_ENABLED=0）是 go build 的天然能力——同一台
+// Windows 开发机上同时产出 windows/linux amd64 二进制，Docker（linux）与
+// 本机（windows）共用同一个 jar（"单 JAR 单 Docker"的构建侧闭环）。
+// 【教学注释 · 对比 npm 的 cmd /c】go.exe 是真可执行文件，Exec 直接调 'go' 即可；
+// npm 在 Windows 上是 npm.cmd 批处理，才必须经 cmd /c（见上面 npmCommandLine）。
+// ------------------------------------------------------------
+// 【Groovy 大坑·同 frontend】任务闭包内一律 ext 属性，不用脚本级 def。
+// ============================================================
+ext.golangDir = file("${projectDir}/golang")
+ext.golangHashFile = new File(project.buildDir, '.golang-build-hash')
+
+// 双平台产物表：目录名与 GoProcessLauncher.platformDir 逐字对齐
+// （windows-amd64 / linux-amd64），二进制名对齐"windows 加 .exe"的平台惯例
+ext.goTargetPlatforms = ['windows-amd64': 'toolbox.exe', 'linux-amd64': 'toolbox']
+
+// Go 工具链探测：无 go 命令时 execute() 抛 IOException（Windows: CreateProcess error=2）
+ext.goToolchainAvailable = {
+    try {
+        def proc = 'go version'.execute()
+        proc.waitFor()
+        proc.exitValue() == 0
+    } catch (IOException ignored) {
+        false
+    }
+}
+
+// 计算 Go 源码指纹（同 frontendFingerprint 的动机：源码不变就不重编——
+// 顺带省掉每次构建的工具链探测与进程拉起开销）
+def golangFingerprint() {
+    if (!golangDir.exists()) return null
+    def files = fileTree(golangDir) {
+        include '**/*.go', 'go.mod', 'go.sum'
+    }
+    def source = files.files.collect { it.path + ':' + it.lastModified() }.join('\n')
+    def digest = java.security.MessageDigest.getInstance('SHA-256')
+    digest.digest(source.getBytes('UTF-8')).encodeHex().toString()
+}
+
+// 作废旧产物：二进制与指纹 hash 必须同生同灭——只删二进制不删 hash 会让
+// 下一轮"指纹匹配"误判可复用，产物实际已删（jar 静默缺 golang/ 的实测教训）
+ext.invalidateGoBinaries = {
+    delete layout.buildDirectory.dir('golang-bin')
+    delete golangHashFile
+}
+
+task buildGoToolbox {
+    group = 'golang'
+    description = '交叉编译 Go 工具箱双平台二进制（windows/linux amd64，源码指纹变化时才重编）'
+    // 【为什么不用 onlyIf 而用任务体分支】skip 分支除了"不编译"还要"作废旧产物"——
+    // onlyIf=false 时连 doLast 都不执行，作废动作没处放；而"过期二进制进 jar"
+    // 比"jar 里没有二进制"更糟（版本错位静默上线）。四态分支：
+    //   golang/ 不存在                   → 跳过（理论上不会发生，防呆）
+    //   显式关（-PskipGoBuild）          → 作废旧产物，跳过
+    //   无工具链                          → warn + 作废旧产物，跳过（构建不炸：
+    //                                      GoProcessLauncher 有 go run 开发轨兜底，
+    //                                      且 engine.go.enabled 默认 false 时关闭态零影响）
+    //   指纹未变                          → 复用既有二进制，跳过
+    //   其余（源码变化 + 工具链在场）      → 双平台交叉编译 + 记录指纹
+    // 【输出用英文的原因】Windows 控制台默认 GBK，Gradle 的中文 lifecycle 输出
+    // 会打成乱码（同 channelIT 的 file.encoding 注释）——注释中文、输出英文
+    doLast {
+        def fp = golangFingerprint()
+        if (fp == null) {
+            logger.lifecycle('golang/ project not found, skip Go toolbox build')
+            return
+        }
+        if (project.hasProperty('skipGoBuild')) {
+            logger.lifecycle('-PskipGoBuild set: Go build disabled, invalidating stale binaries')
+            invalidateGoBinaries()
+            return
+        }
+        if (!goToolchainAvailable()) {
+            logger.warn('No Go toolchain on this machine: skip build and invalidate stale ' +
+                    'binaries (jar will NOT contain golang/; runtime falls back to the ' +
+                    'go-run dev track, or keep engine.go.enabled=false which is the default)')
+            invalidateGoBinaries()
+            return
+        }
+        // 指纹匹配且产物确实在场才复用——产物与 hash 必须同生同灭（见 invalidateGoBinaries）
+        def binariesPresent = goTargetPlatforms.every { platform, binary ->
+            layout.buildDirectory.file("golang-bin/${platform}/${binary}").get().asFile.exists()
+        }
+        if (golangHashFile.exists() && golangHashFile.text == fp && binariesPresent) {
+            logger.lifecycle('Go source fingerprint unchanged, reuse existing binaries')
+            return
+        }
+        goTargetPlatforms.each { platform, binary ->
+            def out = layout.buildDirectory.file("golang-bin/${platform}/${binary}").get().asFile
+            out.parentFile.mkdirs()
+            project.exec {
+                workingDir golangDir
+                // GOOS/GOARCH 指定目标平台；CGO_ENABLED=0 纯静态是交叉编译的
+                // 前提——一旦引 cgo 就需要目标平台的 C 工具链，纯 Go 才免
+                environment 'GOOS', platform.split('-')[0]
+                environment 'GOARCH', platform.split('-')[1]
+                environment 'CGO_ENABLED', '0'
+                // -trimpath 去掉编译机绝对路径（构建可复现，二进制不泄露开发目录）
+                commandLine 'go', 'build', '-trimpath', '-o', out, './cmd/toolbox'
+            }
+            logger.lifecycle("Go toolbox built: golang-bin/${platform}/${binary}")
+        }
+        golangHashFile.parentFile.mkdirs()
+        golangHashFile.text = fp
+    }
+}
+
+task packageGolang(type: Copy) {
+    group = 'golang'
+    description = '把 Go 双平台二进制复制进 jar 资源目录（classpath:/golang/<platform>/）'
+    dependsOn buildGoToolbox
+    // clean-first（同 copyFrontendDist）：无产物/产物被作废时也让 golang-pack 归零——
+    // 过期二进制绝不进 jar；golang-bin 缺失时 Copy 无源可拷是合法空跑
+    doFirst { delete layout.buildDirectory.dir('golang-pack') }
+    from layout.buildDirectory.dir('golang-bin')
+    into layout.buildDirectory.dir('golang-pack/golang')
+}
+
+// 把 build/golang-pack 注册为资源目录，processResources 时一并打入 jar
+sourceSets.main.resources.srcDir layout.buildDirectory.dir('golang-pack')
+processResources.dependsOn packageGolang
+
+// ============================================================
 // channelIT — 双通道集成测试（拉真实 Python 子进程）
 // 用法: gradlew :engine-server:channelIT
 // 【教学注释 · JavaExec】在 Gradle 里直接跑一个带 classpath 的 main 方法，

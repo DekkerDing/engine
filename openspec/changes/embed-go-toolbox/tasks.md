@@ -33,7 +33,7 @@
 
 ## 5. 构建编排与 CI
 
-- [ ] 5.1 `build.gradle` 加 `buildGoToolbox`（GOOS=windows/linux 双平台交叉编译、源码指纹 onlyIf、本机无 Go 且开关关闭时允许跳过）与 `packageGolang`（Copy → `build/golang-pack/golang/<platform>/`）并注册 sourceSets；验证：`gradlew :engine-server:bootJar` 后 jar 内 `classpath:/golang/` 存在双平台二进制（unzip -l 断言）
+- [x] 5.1 `build.gradle` 加 `buildGoToolbox`（GOOS=windows/linux 双平台交叉编译、源码指纹 onlyIf、本机无 Go 且开关关闭时允许跳过）与 `packageGolang`（Copy → `build/golang-pack/golang/<platform>/`）并注册 sourceSets；验证：`gradlew :engine-server:bootJar` 后 jar 内 `classpath:/golang/` 存在双平台二进制（unzip -l 断言）（实测：镜像 frontend 模式（ext 属性防闭包 MissingProperty 坑 + SHA-256 源码指纹 + Copy clean-first + sourceSets 注册）；四态任务体分支而非 onlyIf——skip 分支还要"作废旧产物"，onlyIf=false 连 doLast 都不执行没处放（过期二进制进 jar 比缺失更糟）；产物表 ['windows-amd64':'toolbox.exe','linux-amd64':'toolbox'] 与 GoProcessLauncher.platformDir/binaryName 逐字对齐；CGO_ENABLED=0 静态链接（file 实测 linux 产物 ELF statically linked——Docker 无 libc 依赖）+ -trimpath 可复现构建；产物验证：双平台编译 43s → 指纹未变复用 4s → -PskipGoBuild 作废 → 重编后 bootJar，unzip -l 断言 BOOT-INF/classes/golang/{linux-amd64/toolbox,windows-amd64/toolbox.exe} 双双在场，jar 解压出的 windows 二进制管道实测 sys.ping → pong 0.2.0；实测教训一条：作废只删 golang-bin 不删指纹 hash → 下轮指纹匹配误判"复用"而产物已删 → packageGolang NO-SOURCE jar 静默缺 golang/——修复为二进制与 hash 同生同灭 + 复用分支加产物在场防御；无工具链分支 warn 并作废不炸构建（go run 开发轨兜底 + 默认关闭态零影响））
 - [ ] 5.2 `.gitignore` 加 `go-runtime/` 与 Go 构建产物；验证：构建后 `git status` 不出现新垃圾文件
 - [ ] 5.3 Jenkinsfile：节点要求注释 +Go、`GOPROXY=https://goproxy.cn`、Package 阶段确认含 Go 构建；验证：Jenkinsfile 语法走查 + 本地按流水线同序手工执行一遍全绿（记录输出）
 - [ ] 5.4 离线构建验证：断网状态（或 GOFLAGS=-mod=mod + GOPROXY=off 构造）跑 `buildGoToolbox` 成功；验证：命令输出留痕，证明零三方依赖
