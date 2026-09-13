@@ -20,7 +20,7 @@
 
 - [x] 3.1 Go 侧 `internal/engine` 注册 `text.chunk`/`text.tokenize`/`text.keywords`（接 `internal/text` 手写实现）；修正 `appendChunk` 为 rune 感知硬切（spec 中文正确性硬约束）；验证：`go test ./internal/text/...` 7 项全绿（含 1000 汉字无标点硬切三块全合法 UTF-8 且拼回原文 / 重叠保链精确断言 / search-exact-spec 场景 / TF 频次区分度回归防线）+ 真实二进制管道三方法实测（chunk 契约小写字段、tokenize bigram 与 spec 场景逐 token 一致、keywords 频次排序恢复——顺带修掉 bigram 先去重导致 TF 恒 1 的语义 bug；句子累计判长从 byte 口径改 rune 口径对齐 Java String.length()，否则中文块比 Java 小三分之二）
 - [x] 3.2 Go 侧注册 `hashing.generate`（接 `internal/hashing`，参数 text/dim/normalize，result 含 vector/dim/degraded）与 `sys.stats`（engine/version/vector_count/tools）；验证：`go test ./...` 全绿（hashing 6 项：确定性/维度回落与奇数维/值域 [-1,1)/灵敏性/L2=1/归一保方向）+ 手工管道帧实测（hashing.generate 四维归一向量 degraded:true；sys.stats 六方法字典序含自身、vector_count=0 待 4.x 回填）——Router 补 `Methods()`（map 遍历随机须排序）
-- [ ] 3.3 Java 对拍测试：`text.chunk` vs Java 分块器（块数/块文本/重叠一致）、`hashing.generate` 确定性（两次调用逐元素相等、normalize 模长=1）；验证：假通道或直连引擎的对拍单测全绿
+- [x] 3.3 Java 对拍测试：`text.chunk` vs Java 分块器（块数/块文本/重叠一致）、`hashing.generate` 确定性（两次调用逐元素相等、normalize 模长=1）；验证：GoTextParityTest 7 项全过——真实引擎（go run 轨）完整协议链对拍，TextChunker(400,1) vs text.chunk 四语料逐块一致（60 句中文标点 / 1000 汉字无标点双端硬切 / 中英混排 / 短文本），哈希确定性（128 维两调用逐元素相等）、L2 模长=1（1e-9）、embedBatch 与单条 generate 同参逐元素一致（1e-7 float 落地容差）；无 Go 环境 assume-skip
 - [ ] 3.4 降级向量化集成：`go-toolbox` Profile 下摄取走 `GoToolboxProvider.embedBatch`（hashing.generate，degraded=true），检索链路正常完成；验证：集成测试摄取→检索闭环（哈希向量语义检索结果为确定性降级输出，不做相关性断言，只断链路不断线）
 
 ## 4. 场景二：vector.*（索引副本 + 并行扫描）
