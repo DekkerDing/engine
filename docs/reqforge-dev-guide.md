@@ -161,13 +161,23 @@ engine-server/src/main/java/io/github/dekkerding/engine/
 │   │   ├── LocalFileAttachmentStore.java     # 本地文件附件存储
 │   │   └── AttachmentFormatGuard.java        # 附件格式白名单校验
 │   ├── python/                               # Python 引擎通道
+│   ├── go/                                   # Go 引擎通道（gotoolbox，D10 正典）
+│   │   ├── GoProcessLauncher.java            #   二进制定位链五级（直指→环境变量→golang 直用→go run→classpath 解压）
+│   │   ├── GoStdioChannel.java               #   stdio 通道（毒丸/串行/迟到帧）+ 健康探活
+│   │   ├── protocol/GoProtocol.java          #   帧 DTO（键名契约单源）
+│   │   ├── GoToolboxProvider.java            #   降级向量化门面（第二级门控 go-toolbox Profile）
+│   │   └── GoVectorReplica.java              #   索引副本门面（第一级门控 engine.go.enabled）
 │   ├── fulltext/                             # Lucene 全文索引
 │   ├── document/                             # 文档解析（txt/docx/pdf）
-│   └── search/                               # 内存向量索引
-└── python/                                   # Python 引擎源码（server 资产）
-    ├── server_py4j.py                        # Py4J 通道入口
-    ├── server_stdio.py                       # stdio 通道入口
-    └── core/
+│   └── search/                               # 内存向量索引（Go 轨路由 + 本地兜底同源）
+├── python/                                   # Python 引擎源码（server 资产）
+│   ├── server_py4j.py                        # Py4J 通道入口
+│   ├── server_stdio.py                       # stdio 通道入口
+│   └── core/
+└── golang/                                   # Go 工具箱引擎源码（server 资产，Go 1.21+ 零三方依赖）
+    ├── go.mod                                #   module engine/gotoolbox
+    ├── cmd/toolbox/main.go                   #   入口：装配 router → 注册方法 → 协议循环
+    └── internal/                             #   protocol / router / engine / text / hashing / vector
 ```
 
 ### 2.2 interfaces.web 静态三件套（原网关职能的内化）
@@ -845,6 +855,20 @@ java -jar build\libs\engine-server.jar
 java -jar engine-server\build\libs\engine-server.jar --engine.python.home=engine-server\python
 ```
 
+**Go 工具箱引擎（gotoolbox，默认关闭）**：
+
+```powershell
+# 开启态：降级向量化（Go 哈希向量接管 TEXT 模态）+ 检索并行加速，两级开关缺一不可
+java -jar engine-server\build\libs\engine-server.jar --spring.profiles.active=go-toolbox --engine.go.enabled=true
+
+# 只开第一级（engine.go.enabled=true）：仅检索加速（vector.* 副本），向量化仍走 Python
+# 任意目录纯 jar 可跑：Go 二进制自动从 jar 内解压到 .\go-runtime\<platform>\ 后执行
+# 开发态（未打 jar）：需本机 Go 工具链，launcher 自动走 golang\ 源码的 go run 开发轨
+```
+
+开关语义详表（两级门控四行矩阵）见 [gotoolbox-spec](file:///F:/workspace/engine/docs/reqforge-gotoolbox-spec.md) §4。
+默认 `engine.go.enabled=false`：零 Bean 零进程零解压，行为与基线一致。
+
 ### 7.3 前端热更新开发模式（推荐前端开发使用）
 
 ```powershell
@@ -881,9 +905,12 @@ flutter run -d chrome           # Web 调试
 curl http://127.0.0.1:8090/actuator/health
 # → {"status":"UP"}
 
-# 合体信封（整体 + engine/documents 明细）
+# 合体信封（整体 + engine/goToolbox/documents 明细）
 curl http://127.0.0.1:8090/api/system/health
-# → {status, gateway, server, engine, documents}
+# → {status, gateway, server, engine, goToolbox, documents}
+#   goToolbox: {enabled:false,status:"N/A"}（默认关闭）或
+#             {enabled:true,status:"UP|DOWN",version,vectorCount,tools,lastError}
+#   注意：goToolbox DOWN 不拖垮整体 status（加速器语义，检索自动降级本地扫）
 
 # 浏览器打开
 # 生产：http://127.0.0.1:8090
@@ -899,11 +926,25 @@ curl http://127.0.0.1:8090/api/system/health
 ```powershell
 # 在 F:\workspace\engine 根目录执行——一条命令出全部
 .\gradlew :engine-server:bootJar
-# 前端构建（npmInstall → buildFrontend → copyFrontendDist）与
-# python 脚本打包（packagePython）被自动拉起，产物全部进 jar：
+# 前端构建（npmInstall → buildFrontend → copyFrontendDist）、python 脚本打包
+# （packagePython）与 Go 双平台交叉编译（buildGoToolbox → packageGolang）
+# 被自动拉起，产物全部进 jar：
 # 产物：engine-server/build/libs/engine-server.jar
 #   ├─ BOOT-INF/classes/static/    ← 前端构建产物
-#   └─ BOOT-INF/classes/python/    ← Python 脚本资产
+#   ├─ BOOT-INF/classes/python/    ← Python 脚本资产
+#   └─ BOOT-INF/classes/golang/    ← Go 双平台二进制（windows-amd64/toolbox.exe
+#                                    + linux-amd64/toolbox，CGO_ENABLED=0 静态链接）
+```
+
+**本地构建需要 Go 1.21+**（`golang/go.mod` 钉的下限）。本机无 Go 工具链时构建
+warn 跳过不炸——但 jar 缺 `golang/` 二进制，开启态须本机 Go 走 `go run` 开发轨；
+`-PskipGoBuild` 显式关闭。Go 源码指纹未变时跳过重编（镜像前端 fingerprint 模式）。
+零三方依赖：`GOPROXY=off` 也能全量构建（`go list -m all` 只有自身）。
+
+验证 jar 内双平台二进制：
+```powershell
+# Git Bash
+unzip -l engine-server/build/libs/engine-server.jar | grep golang/
 ```
 
 镜像构建与部署详见 [deployment.md](file:///F:/workspace/engine/docs/deployment.md)。
@@ -1044,6 +1085,30 @@ A: IDE 打断点，以 Debug 模式启动 `ServerApplication`；或远程调试�
 ```powershell
 java -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=5005 -jar ...
 ```
+
+**Q: 构建时提示 `No Go toolchain on this machine`**
+
+A: 本机无 Go 工具链——构建 warn 跳过不炸，但 jar 缺 `golang/` 二进制。装 Go 1.21+
+（`go version` 验证）后重跑；或确认确实不需要（保持 `engine.go.enabled=false`
+默认关闭态，jar 缺二进制无影响）。显式关闭：`.\gradlew :engine-server:bootJar -PskipGoBuild`。
+
+**Q: 开启态健康段 `goToolbox.status=DOWN`**
+
+A: 按序排查：①看 `lastError` 字段（探活失败原因直接可读）；②启动日志搜
+`[go-err]`（Go 进程 stderr 桥接）与 `Go toolbox engine ready`；③ Go 引擎挂了
+**服务依然可用**（检索自动降级本地扫、摄取降级哈希），DOWN 是性能退化提示不是故障；
+④重启应用即恢复（v1 不自动重启子进程）。
+
+**Q: Windows 防病毒拖慢/拦截 Go 子进程**
+
+A: 首次启动时 Defender 实时扫描刚解压的 `go-runtime\windows-amd64\toolbox.exe`
+可能拖慢启动数秒——重复启动无此现象（大小比对免重解压）；若被误报隔离，把工程
+目录加入白名单后重启应用（解压轨会自动补回二进制）。
+
+**Q: 离线/弱网环境能构建吗**
+
+A: 能。Go 工程零三方依赖（`go list -m all` 只有自身），`GOPROXY=off` 下
+`buildGoToolbox` 照常编译；前端/python 环节不受影响（npm 源与 pip 源见上文）。
 
 ### 10.2 前端
 
