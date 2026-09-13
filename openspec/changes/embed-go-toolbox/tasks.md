@@ -44,7 +44,7 @@
 
 ## 7. /docs 文档（增量提交：一篇一 commit）
 
-- [ ] 7.1 新增 `docs/reqforge-gotoolbox-design.md`（含架构图、D1-D9 决策、「Go 速成路线图」按代码走读顺序）；验证：文档内引用的文件路径/行号与代码一致
+- [x] 7.1 新增 `docs/reqforge-gotoolbox-design.md`（含架构图、D1-D9 决策、「Go 速成路线图」按代码走读顺序）；验证：文档内引用的文件路径/行号与代码一致（实测：七节结构——一句话三场景表 / ASCII 架构图（读图三要点：请求只进 Java、InMemoryVectorIndex 四角色枢纽、降级路径永远在）/ D1-D10 决策定稿摘要各带代码锚点（design.md 实有 D10，任务原文 D1-D9 为拟稿时计数，全量收录）/ Go+Java 组件地图两表 / Go 速成路线图 8 站+毕业考（第 7 站并行扫描标全文档最重要）/ 构建部署速查 / 与既有文档关系表；路径核对脚本全过（18 处引用逐一 OK，GoProtocol 补 protocol 子包标注；gotoolbox-spec.md 为 7.2 前向引用）；引用以路径+符号锚点为主避免行号漂移）
 - [ ] 7.2 新增 `docs/reqforge-gotoolbox-spec.md`（协议帧、方法注册表契约、副本同步语义、开关矩阵）；验证：与 spec delta 逐条对照无遗漏
 - [ ] 7.3 改写 `docs/learning-path.md` 增补 Go 章节与走读路线；验证：章节引用的代码锚点存在
 - [ ] 7.4 改写 `docs/reqforge-dev-guide.md`（本地构建需 Go、开关说明、常见排查：防病毒/端口/离线）；验证：按文档从零构建一遍可复现
