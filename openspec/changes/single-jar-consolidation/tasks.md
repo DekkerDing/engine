@@ -37,7 +37,8 @@
 
 ## [W3] 4. 退役 Go 网关工程 —— 与组 5、6 并行编辑（验证串行：本组先于组 5 的 docker build）
 
-- [ ] 4.1 删除 `engine-gateway/` 整目录，验证 `gradlew build` 全绿且仓库无残留引用（grep engine-gateway 仅剩 docs 与 openspec 历史）后 commit（锚点 4.1）
+- [x] 4.1 删除 `engine-gateway/` 整目录，验证 `gradlew build` 全绿且仓库无残留引用（grep engine-gateway 仅剩 docs 与 openspec 历史）后 commit（锚点 4.1）
+  - 实测：`gradlew build` 全绿（142 测试含）；构建体系（gradle/yml）无 gateway 残留，docker/ 引用由组 5 紧随处理
 - [ ] 4.2 清理 `.gitignore`/`.dockerignore` 中 gateway 条目，验证 `git status` 无意外文件暴露后 commit（锚点 4.2）
 
 ## [W3] 5. Docker 与 Jenkinsfile —— 与组 4、6 并行编辑；docker build 验证须待 4.1 完成
