@@ -9,6 +9,7 @@ import io.github.dekkerding.engine.infrastructure.python.protocol.PythonProtocol
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -24,8 +25,14 @@ import java.util.List;
  *
  * <p>【图片扩展预留】后期新增 ClipEmbeddingProvider 同样实现 EmbeddingProvider
  * （modality=CROSS，modelKey="clip"），与本类并存注册——按模态查找 provider 即可。
+ *
+ * <p>【让位语义】go-toolbox Profile 激活时本类缺席——Go 的哈希向量 provider
+ * 接管 TEXT 模态（spec「配置开关与默认零变化」）。若不让位，registry 对
+ * 同模态双 provider 启动即炸（IllegalStateException）；「缺席」而非「优先级」
+ * 是刻意的：降级模式是整体切换，不是竞争选举。
  */
 @Component
+@Profile("!go-toolbox")
 public class ChannelEmbeddingProvider implements EmbeddingProvider, EngineStatusQuery {
 
     private static final Logger log = LoggerFactory.getLogger(ChannelEmbeddingProvider.class);

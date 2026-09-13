@@ -10,6 +10,7 @@ import io.github.dekkerding.engine.domain.model.vector.Embedding;
 import io.github.dekkerding.engine.domain.model.vector.EmbeddingModality;
 import io.github.dekkerding.engine.domain.repository.AnnotationProvider;
 import io.github.dekkerding.engine.domain.repository.EmbeddingProvider;
+import io.github.dekkerding.engine.domain.repository.VisionStatusQuery;
 import io.github.dekkerding.engine.domain.repository.ImageAssetRepository;
 import io.github.dekkerding.engine.infrastructure.persistence.DatabaseMigrator;
 import io.github.dekkerding.engine.infrastructure.persistence.SqliteConnectionManager;
@@ -168,11 +169,11 @@ class ImageApplicationServiceTest {
                 imageAssetRepository,
                 vectorStore,
                 new EmbeddingProviderRegistry(Arrays.asList(clipProvider, textProvider)),
-                annotator,
-                () -> new io.github.dekkerding.engine.domain.model.engine.EngineStatus(
+                Optional.of(annotator),
+                Optional.<VisionStatusQuery>of(() -> new io.github.dekkerding.engine.domain.model.engine.EngineStatus(
                         true, clipProvider.degraded, "stub-channel",
                         Arrays.asList("stub-clip"), 4,
-                        clipProvider.degraded ? "真实模型加载失败，哈希兜底" : null),
+                        clipProvider.degraded ? "真实模型加载失败，哈希兜底" : null)),
                 tempDir.resolve("images").toString(),
                 20L * 1024 * 1024,
                 event -> { /* 哑事件总线：单测环境无 Spring 容器 */ });
@@ -269,8 +270,9 @@ class ImageApplicationServiceTest {
         ImageApplicationService strict = new ImageApplicationService(
                 imageAssetRepository, vectorStore,
                 new EmbeddingProviderRegistry(Arrays.asList(clipProvider, textProvider)),
-                annotator,
-                () -> io.github.dekkerding.engine.domain.model.engine.EngineStatus.down("stub", null),
+                Optional.of(annotator),
+                Optional.<VisionStatusQuery>of(
+                        () -> io.github.dekkerding.engine.domain.model.engine.EngineStatus.down("stub", null)),
                 tempDir.resolve("images-strict").toString(),
                 10, event -> { });
         try {

@@ -12,6 +12,7 @@ import io.github.dekkerding.engine.domain.model.vector.EmbeddingModality;
 import io.github.dekkerding.engine.domain.model.vector.VectorEntry;
 import io.github.dekkerding.engine.domain.repository.DocumentRepository;
 import io.github.dekkerding.engine.domain.repository.EmbeddingProvider;
+import io.github.dekkerding.engine.domain.repository.EngineStatusQuery;
 import io.github.dekkerding.engine.domain.repository.VisionStatusQuery;
 import io.github.dekkerding.engine.infrastructure.document.CompositeDocumentParser;
 import io.github.dekkerding.engine.infrastructure.document.TxtDocumentParser;
@@ -155,8 +156,8 @@ class SearchModalityRoutingTest {
                 vectorStore,
                 fullTextIndex,
                 Arrays.asList(textProvider),
-                () -> new EngineStatus(true, false, "stub-channel",
-                        Arrays.asList("stub-text-model"), 4, null),
+                Optional.<EngineStatusQuery>of(() -> new EngineStatus(true, false, "stub-channel",
+                        Arrays.asList("stub-text-model"), 4, null)),
                 tempDir.resolve("documents").toString(),
                 50 * 1024 * 1024, 400, 1,
                 event -> { });

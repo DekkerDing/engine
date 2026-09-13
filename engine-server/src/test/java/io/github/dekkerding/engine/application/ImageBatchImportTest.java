@@ -11,6 +11,7 @@ import io.github.dekkerding.engine.domain.model.vector.Embedding;
 import io.github.dekkerding.engine.domain.model.vector.EmbeddingModality;
 import io.github.dekkerding.engine.domain.repository.AnnotationProvider;
 import io.github.dekkerding.engine.domain.repository.EmbeddingProvider;
+import io.github.dekkerding.engine.domain.repository.VisionStatusQuery;
 import io.github.dekkerding.engine.infrastructure.persistence.DatabaseMigrator;
 import io.github.dekkerding.engine.infrastructure.persistence.SqliteConnectionManager;
 import io.github.dekkerding.engine.infrastructure.persistence.SqliteImageAssetRepository;
@@ -26,6 +27,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -116,9 +118,9 @@ class ImageBatchImportTest {
                 imageAssetRepository,
                 vectorStore,
                 new EmbeddingProviderRegistry(Arrays.asList(clipProvider, new StubTextProvider())),
-                new StubAnnotator(),
-                () -> new io.github.dekkerding.engine.domain.model.engine.EngineStatus(
-                        true, false, "stub-channel", Collections.singletonList("stub-clip"), 4, null),
+                Optional.of(new StubAnnotator()),
+                Optional.<VisionStatusQuery>of(() -> new io.github.dekkerding.engine.domain.model.engine.EngineStatus(
+                        true, false, "stub-channel", Collections.singletonList("stub-clip"), 4, null)),
                 tempDir.resolve("images").toString(),
                 20L * 1024 * 1024,
                 event -> { });

@@ -134,7 +134,7 @@ class DocumentApplicationServiceTest {
                 vectorStore,
                 fullTextIndex,
                 Arrays.asList(provider),
-                engineStatus,
+                Optional.of(engineStatus),
                 tempDir.resolve("documents").toString(),
                 50 * 1024 * 1024,
                 400, 1,
@@ -216,7 +216,7 @@ class DocumentApplicationServiceTest {
                 documentRepository,
                 new CompositeDocumentParser(Arrays.asList(new TxtDocumentParser())),
                 vectorStore, fullTextIndex, Arrays.asList(provider),
-                () -> EngineStatus.down("stub", null),
+                Optional.<EngineStatusQuery>of(() -> EngineStatus.down("stub", null)),
                 tempDir.resolve("documents").toString(),
                 10, 400, 1,
                 event -> { });

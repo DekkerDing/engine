@@ -11,6 +11,7 @@ import io.github.dekkerding.engine.infrastructure.python.protocol.PythonProtocol
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -35,8 +36,13 @@ import java.util.List;
  * <p>【空间键纪律】写出的 {@link Embedding} 一律以 "clip" 为 modelKey
  * （与 Python registry 的 key 一致），这是向量空间的身份证；
  * 真实模型名（OFA-Sys/chinese-clip-vit-base-patch16）只在引擎状态里展示。
+ *
+ * <p>【让位语义】go-toolbox Profile 激活时本类缺席（同
+ * {@link ChannelEmbeddingProvider}）——降级模式不支持图片模态，
+ * 图片端点运行时报「CROSS 模态无 provider」而非启动炸装配。
  */
 @Component
+@Profile("!go-toolbox")
 public class ClipEmbeddingProvider implements EmbeddingProvider, VisionStatusQuery {
 
     private static final Logger log = LoggerFactory.getLogger(ClipEmbeddingProvider.class);

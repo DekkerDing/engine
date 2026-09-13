@@ -5,6 +5,7 @@ import io.github.dekkerding.engine.application.event.SearchCacheInvalidationEven
 import io.github.dekkerding.engine.domain.exception.EngineException;
 import io.github.dekkerding.engine.domain.model.image.ImageAnnotation;
 import io.github.dekkerding.engine.domain.model.image.ImageAsset;
+import io.github.dekkerding.engine.domain.model.engine.EngineStatus;
 import io.github.dekkerding.engine.domain.model.image.ImageStatus;
 import io.github.dekkerding.engine.domain.model.resource.ImageAssetResource;
 import io.github.dekkerding.engine.domain.model.resource.TextDocumentResource;
@@ -32,6 +33,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -66,8 +68,10 @@ public class ImageApplicationService {
     private final ImageAssetRepository imageAssetRepository;
     private final VectorStore vectorStore;
     private final EmbeddingProviderRegistry providerRegistry;
-    private final AnnotationProvider annotationProvider;
-    private final VisionStatusQuery visionStatus;
+    /** Optional：go-toolbox 降级模式下 python 标注器让位缺席，标注步退化为失败标记（不阻塞入库） */
+    private final Optional<AnnotationProvider> annotationProvider;
+    /** Optional：go-toolbox 降级模式下 CLIP 适配器让位缺席，详情页降级原因退化为静态文案 */
+    private final Optional<VisionStatusQuery> visionStatus;
     private final ImageFormatGuard formatGuard;
     /** 进程内事件总线：图片入库 → 检索缓存失效（与文档摄取同一机制） */
     private final ApplicationEventPublisher eventPublisher;
@@ -87,8 +91,8 @@ public class ImageApplicationService {
     public ImageApplicationService(ImageAssetRepository imageAssetRepository,
                                    VectorStore vectorStore,
                                    EmbeddingProviderRegistry providerRegistry,
-                                   AnnotationProvider annotationProvider,
-                                   VisionStatusQuery visionStatus,
+                                   Optional<AnnotationProvider> annotationProvider,
+                                   Optional<VisionStatusQuery> visionStatus,
                                    @Value("${engine.images.upload-dir:data/images}") String uploadDir,
                                    @Value("${engine.images.max-file-size-bytes:20971520}") long maxFileSizeBytes,
                                    ApplicationEventPublisher eventPublisher) {
@@ -195,17 +199,22 @@ public class ImageApplicationService {
 
             // ① 语义标注（design D5：解析后、向量化前）。失败 = 图片仍有像素路可用，
             //    原因落 annotationError 供详情页追溯——spec：标注失败不阻塞入库
-            try {
-                // filename=原始文件名（mock 标注按它派生语义——存储路径是 uuid 命名，
-                // 拿它派生只会得到无语义片段，5.3 缩样实测暴露后修正）
-                ImageAnnotation annotation = annotationProvider.annotate(
-                        imageAsset.getStoredPath(), imageAsset.getFilename(), caption);
-                imageAsset.applyAnnotation(annotation);
-                log.info("图片标注完成: {} (mocked={}, subject=\"{}\")",
-                        imageAsset.getFilename(), annotation.isMocked(), annotation.getSubject());
-            } catch (Exception e) {
-                imageAsset.markAnnotationFailed("标注失败: " + reasonOf(e));
-                log.warn("图片标注失败（不阻塞入库）: {} ({})", imageAsset.getFilename(), reasonOf(e));
+            if (annotationProvider.isPresent()) {
+                try {
+                    // filename=原始文件名（mock 标注按它派生语义——存储路径是 uuid 命名，
+                    // 拿它派生只会得到无语义片段，5.3 缩样实测暴露后修正）
+                    ImageAnnotation annotation = annotationProvider.get().annotate(
+                            imageAsset.getStoredPath(), imageAsset.getFilename(), caption);
+                    imageAsset.applyAnnotation(annotation);
+                    log.info("图片标注完成: {} (mocked={}, subject=\"{}\")",
+                            imageAsset.getFilename(), annotation.isMocked(), annotation.getSubject());
+                } catch (Exception e) {
+                    imageAsset.markAnnotationFailed("标注失败: " + reasonOf(e));
+                    log.warn("图片标注失败（不阻塞入库）: {} ({})", imageAsset.getFilename(), reasonOf(e));
+                }
+            } else {
+                // go-toolbox 降级模式：标注器让位缺席——与"标注失败"同语义，不阻塞入库
+                imageAsset.markAnnotationFailed("标注器缺席（go-toolbox 降级模式，图片模态不受支持）");
             }
 
             // ② 像素路：整图一资源（一图一向量）。文件名随向量冗余入库，命中列表不用回查
@@ -325,9 +334,11 @@ public class ImageApplicationService {
         EmbeddingProvider clipProvider = providerRegistry.require(EmbeddingModality.CROSS);
         String degradedReason = null;
         if (imageAsset.isDegraded()) {
-            degradedReason = visionStatus.visionStatus().isDegraded()
-                    ? "CLIP 引擎降级运行: " + visionStatus.visionStatus().getLastError()
-                    : "摄取时 CLIP 处于降级模式（哈希兜底向量），当前引擎已恢复";
+            // CLIP 在场：报实时状态；缺席（go-toolbox 降级模式）：报静态说明
+            degradedReason = visionStatus.map(VisionStatusQuery::visionStatus)
+                    .filter(EngineStatus::isDegraded)
+                    .map(s -> "CLIP 引擎降级运行: " + s.getLastError())
+                    .orElse("摄取时 CLIP 处于降级模式（哈希兜底向量），当前引擎已恢复");
         }
         return new ImageDetail(imageAsset,
                 clipProvider.modelKey(), clipProvider.dimension(), degradedReason);

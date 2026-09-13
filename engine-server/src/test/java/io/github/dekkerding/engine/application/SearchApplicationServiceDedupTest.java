@@ -107,7 +107,7 @@ class SearchApplicationServiceDedupTest {
                 vectorStore,
                 fullTextIndex,
                 Arrays.asList(provider),
-                engineStatus,
+                Optional.of(engineStatus),
                 tempDir.resolve("documents").toString(),
                 50 * 1024 * 1024,
                 400, 1,

@@ -4,6 +4,7 @@ import io.github.dekkerding.engine.application.dto.DocumentDetail;
 import io.github.dekkerding.engine.application.event.SearchCacheInvalidationEvent;
 import io.github.dekkerding.engine.domain.exception.EngineException;
 import io.github.dekkerding.engine.domain.model.document.Document;
+import io.github.dekkerding.engine.domain.model.engine.EngineStatus;
 import io.github.dekkerding.engine.domain.model.document.DocumentStatus;
 import io.github.dekkerding.engine.domain.model.document.TextChunk;
 import io.github.dekkerding.engine.domain.model.resource.TextDocumentResource;
@@ -31,6 +32,7 @@ import java.nio.file.Paths;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -71,7 +73,8 @@ public class DocumentApplicationService {
     private final VectorStore vectorStore;
     private final FullTextIndex fullTextIndex;
     private final EmbeddingProvider textEmbeddingProvider;
-    private final EngineStatusQuery engineStatus;
+    /** Optional：go-toolbox 降级模式下 python 引擎适配器让位缺席，详情页降级原因退化为静态文案 */
+    private final Optional<EngineStatusQuery> engineStatus;
     private final TextChunker chunker;
     private final String uploadDir;
     private final long maxFileSizeBytes;
@@ -93,7 +96,7 @@ public class DocumentApplicationService {
                                       VectorStore vectorStore,
                                       FullTextIndex fullTextIndex,
                                       List<EmbeddingProvider> providers,
-                                      EngineStatusQuery engineStatus,
+                                      Optional<EngineStatusQuery> engineStatus,
                                       @Value("${engine.documents.upload-dir:data/documents}") String uploadDir,
                                       @Value("${engine.documents.max-file-size-bytes:52428800}") long maxFileSizeBytes,
                                       @Value("${engine.documents.chunk.target-size:400}") int chunkTargetSize,
@@ -269,9 +272,11 @@ public class DocumentApplicationService {
 
         String degradedReason = null;
         if (document.isDegraded()) {
-            degradedReason = engineStatus.status().isDegraded()
-                    ? "引擎降级运行: " + engineStatus.status().getLastError()
-                    : "摄取时引擎处于降级模式（哈希兜底向量），当前引擎已恢复";
+            // python 引擎在场：报实时引擎状态；缺席（go-toolbox 降级模式）：报静态说明
+            degradedReason = engineStatus.map(EngineStatusQuery::status)
+                    .filter(EngineStatus::isDegraded)
+                    .map(s -> "引擎降级运行: " + s.getLastError())
+                    .orElse("摄取时引擎处于降级模式（哈希兜底向量），当前引擎已恢复");
         }
         return new DocumentDetail(document, chunks,
                 textEmbeddingProvider.modelKey(), textEmbeddingProvider.dimension(), degradedReason);

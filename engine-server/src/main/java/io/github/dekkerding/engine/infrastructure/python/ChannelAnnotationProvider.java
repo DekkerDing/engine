@@ -6,6 +6,7 @@ import io.github.dekkerding.engine.domain.repository.AnnotationProvider;
 import io.github.dekkerding.engine.infrastructure.python.protocol.PythonProtocol;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -16,8 +17,12 @@ import java.util.ArrayList;
  * <p>结构沿 {@link ClipEmbeddingProvider}：只做协议 → 领域对象的翻译，
  * 不含业务逻辑。mock 与未来真实 VLM 在 Python 侧同槽位可换，
  * 本类与 {@link AnnotationProvider} 端口零改动。
+ *
+ * <p>【让位语义】go-toolbox Profile 激活时缺席（同 {@link ClipEmbeddingProvider}）——
+ * 图片管线在降级模式退化为标注失败标记，不阻塞其余模态。
  */
 @Component
+@Profile("!go-toolbox")
 public class ChannelAnnotationProvider implements AnnotationProvider {
 
     private static final Logger log = LoggerFactory.getLogger(ChannelAnnotationProvider.class);
