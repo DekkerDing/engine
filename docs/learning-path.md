@@ -71,9 +71,9 @@ DDD 分层思想（本仓库 Java 侧）──▶   同样的分层纪律应用�
 
 如果你没写过网页，先建立"浏览器在渲染什么"的直觉：
 
-1. 打开 `frontend/index.html` —— 只有一个 `<div id="root">` 和一个 script：现代前端 = JS 接管一切
-2. `frontend/src/layouts/AppLayout.css` —— **全站布局的唯一坐标系**（CSS Grid 二维栅格，注释画了示意图）；改一下 `208px` → `260px`，`npm run dev` 看侧边栏变宽
-3. `frontend/src/main.tsx` + `App.tsx` —— React 的入口与路由表（对照 Spring 的 `@RequestMapping` 集中声明）
+1. 打开 `engine-server/frontend/index.html` —— 只有一个 `<div id="root">` 和一个 script：现代前端 = JS 接管一切
+2. `engine-server/frontend/src/layouts/AppLayout.css` —— **全站布局的唯一坐标系**（CSS Grid 二维栅格，注释画了示意图）；改一下 `208px` → `260px`，`npm run dev` 看侧边栏变宽
+3. `engine-server/frontend/src/main.tsx` + `App.tsx` —— React 的入口与路由表（对照 Spring 的 `@RequestMapping` 集中声明）
 
 概念对照：
 - HTML 结构 → Java 的"数据结构"（静态骨架）
@@ -107,9 +107,9 @@ api/（怎么拿数据） → hooks/（怎么自动拿） → components/（怎�
 带着一个问题读代码：**"用户搜索'红塔'到看到高亮结果，发生了什么？"**
 
 ```
-1. frontend/src/pages/search/     用户提交 → api/search.ts → POST /api/search
-2. gateway handler/proxy.go       剥 /api 前缀 → ReverseProxy 转发 :8081/search
-3. server SearchController        @Valid 校验
+1. frontend src/pages/search/     用户提交 → api/search.ts → POST /api/search
+2. server interfaces.web          资源链：/api/** 优先控制器匹配，非 /api 走静态/SPA 回退
+3. server SearchController        @RequestMapping("/api/search") + @Valid 校验
 4. SearchApplicationService       缓存查询 → RRF 融合编排
 5. ChannelEmbeddingProvider       查询向量化 →（Py4J）→ python EngineFacade.embedTexts
 6. core/embeddings.py             bge-small-zh-v1.5 编码 512 维
@@ -146,11 +146,10 @@ CLIP 文本塔编码查询（`core/vision.py`）→ 仅扫 image 空间（`(sour
 ```bash
 # 环境（Windows）
 $ scripts/env-check.bat                          # JDK/Python/Node 三件套体检
-# 后端双应用（两个终端）
-$ ./gradlew :engine-server:bootRun               # :8081（先起，含 Python 加载 30-60s）
-$ cd engine-gateway && go run .            # :8090（后起）
-# 前端开发态（热更新，代理到 :8090）
-$ cd frontend && npm run dev
+# 后端（单 JAR 合体，唯一进程 :8090，含 Python 加载 30-60s）
+$ ./gradlew :engine-server:bootRun
+# 前端开发态（热更新，/api 代理到 :8090）
+$ cd engine-server/frontend && npm run dev
 # Python 手测
 $ echo '{"op":"stats"}' | python engine-server/python/server_stdio.py
 # 测试

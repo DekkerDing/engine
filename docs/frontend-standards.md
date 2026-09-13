@@ -1,6 +1,6 @@
 # 前端代码规范（frontend-standards）
 
-> 适用范围：`frontend/`（Vite5 + React18 + TypeScript + ReactRouter6 + AntD5）。
+> 适用范围：`engine-server/frontend/`（Vite5 + React18 + TypeScript + ReactRouter6 + AntD5）。
 > 本文回答：**页面怎么定位**（栅格与坐标体系）、**尺寸用什么值**（间距/字号 token）、**代码怎么命名**（组件/文件/API 客户端）、**状态怎么展示**（徽标/横幅约定）。
 > 布局骨架是手写 CSS Grid——组件风格靠 AntD，布局原理靠手写讲透，这是本工程的教学定位。
 
@@ -32,8 +32,8 @@ grid-template:
 /search     → AppLayout > SearchPage
 ```
 
-路由在 `App.tsx` 声明，页面组件放 `pages/<域>/`；深层路由刷新依赖网关 SPA 回退
-（非 /api 未命中 → index.html）。
+路由在 `App.tsx` 声明，页面组件放 `pages/<域>/`；深层路由刷新依赖服务端 SPA 回退
+（非 /api 未命中 → index.html，`SpaFallbackResolver` 提供）。
 
 ---
 
@@ -74,7 +74,7 @@ grid-template:
 ### 3.1 目录职责
 
 ```
-frontend/src/
+engine-server/frontend/src/
 ├── api/          # 统一 API 客户端（唯一允许发请求的地方）
 │   ├── client.ts       # axios 实例：信封解析（code≠0 抛错）、超时、错误 toast
 │   ├── types.ts        # 后端 DTO 类型定义（与 server 响应字段一一对应）
@@ -140,7 +140,7 @@ frontend/src/
 
 ### 5.3 健康卡片（仪表盘）
 
-三组件（网关/业务服务/Python 引擎）+ 通道/模型/维度/降级原因字段；
+三组件卡片（网关/业务服务/Python 引擎——合体后前两段由服务端恒 UP 自证，段名保留兼容）+ 通道/模型/维度/降级原因字段；
 异常组件卡片转红并在刷新周期内可见（默认轮询周期内自动恢复）。
 
 ---
