@@ -51,7 +51,7 @@
 
 ## 8. 全量回归与收尾
 
-- [ ] 8.1 clean build 全绿：`gradlew clean :engine-server:test :engine-server:bootJar`（含 Go 构建）；验证：输出留痕零失败
+- [x] 8.1 clean build 全绿：`gradlew clean :engine-server:test :engine-server:bootJar`（含 Go 构建）；验证：输出留痕零失败（实测：clean 后单序列 1m13s BUILD SUCCESSFUL——buildFrontend（源码指纹重建）→ buildGoToolbox（双平台重编）→ packageGolang → test 194 项 failures=0 errors=0 → bootJar；jar 内 golang/ 双平台二进制 2 个在场；Go 构建在 test 前经 classes 依赖链自动完成，无手工顺序）
 - [ ] 8.2 开关双态冷启动清单：false 态（默认，行为与基线一致——上传/检索/健康对拍）与 true 态（Go 拉起、握手、秒传、对拍、健康段）各过一遍 13 项式清单；验证：逐项实测记录
 - [ ] 8.3 Docker 轨验证：`docker build -f docker/Dockerfile` 镜像内启动，linux 二进制被正确解压执行；验证：容器内 curl :8090 健康含 goToolbox UP（true 态）
 - [ ] 8.4 遗留项清点：Open Questions 两项（健康指标字段、Go 版本下限）落定答案回写 design.md；验证：无未勾任务、无未回写项
