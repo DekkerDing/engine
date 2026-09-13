@@ -1,0 +1,25 @@
+<component name="ProjectRunConfigurationManager">
+  <!-- ============================================================
+       ServerApplication-dev — 开发态调试运行配置（Debug 直跑）
+       ------------------------------------------------------------
+       【为什么需要这个文件】IDEA 自动生成的 ServerApplication 配置
+       没设 Working directory（默认落仓库根 F:\workspace\engine），
+       而 PythonProcessLauncher 按相对路径探测 ./python-runtime、
+       ./python——python/ 实际在 engine-server/ 下，从仓库根启动必然
+       报"未找到 Python 脚本目录"。
+       【修复】WORKING_DIRECTORY 钉到 $ProjectFileDir$/engine-server
+       （即 F:/workspace/engine/engine-server），./python 命中。
+       【用法】IDEA 顶部下拉选 "ServerApplication-dev" → 点 Debug
+       （虫子图标）→ 控制台等 Started ServerApplication → 浏览器
+       http://localhost:8090 。断点随手打，走到即停。
+       【注意】跑之前先构建（配置已带 Make before launch）。
+       ============================================================ -->
+  <configuration default="false" name="ServerApplication-dev" type="SpringBootApplicationConfigurationType" factoryName="Spring Boot">
+    <module name="engine.engine-server.main" />
+    <option name="SPRING_BOOT_MAIN_CLASS" value="io.github.dekkerding.engine.ServerApplication" />
+    <option name="WORKING_DIRECTORY" value="$ProjectFileDir$/engine-server" />
+    <method v="2">
+      <option name="Make" enabled="true" />
+    </method>
+  </configuration>
+</component>
