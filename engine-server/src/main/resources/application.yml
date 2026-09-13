@@ -20,8 +20,9 @@ spring:
       # 文档上传大小限制（须与 engine.documents.max-file-size-bytes 一致）
       max-file-size: 50MB
       max-request-size: 55MB
-  # 激活的 Profile：failover（默认，Py4J 主 + stdio 惰性回退）| py4j | stdio
-  # 见 infrastructure/python/FailoverChannel（双通道融合决策）
+  # 激活的 Profile：failover（默认，Py4J 主 + stdio 惰性回退）| py4j | stdio | go-toolbox
+  # 见 infrastructure/python/FailoverChannel（双通道融合决策）；
+  # go-toolbox = 降级向量化（Go 哈希向量接管 TEXT 模态，须同时 engine.go.enabled=true）
   profiles:
     active: failover
 
@@ -53,6 +54,17 @@ engine:
       # 【图片扩展预留】后期填入 CLIP 模型名即启用图片向量化，Java domain 层零改动
       image-embedding: ~
       clip: ~
+
+  # ---------- Go 工具箱引擎 ----------
+  # 默认关闭（spec「默认零变化」）：false 时零 Bean 零进程零解压，行为与基线一致
+  go:
+    enabled: false
+    # 二进制直指（可选，定位链最高优先级——测试/开发最短路径，绕过工具链）
+    binary: ~
+    # Go 工具链命令：仅开发态 go run 轨使用；生产态走 jar 内 classpath 解压轨
+    command: go
+    # 单次调用超时：Go 无模型加载、调用毫秒级，60s 是宽松上限（对齐 python stdio 语义）
+    stdio-timeout-seconds: 60
 
   # ---------- 文档域 ----------
   documents:

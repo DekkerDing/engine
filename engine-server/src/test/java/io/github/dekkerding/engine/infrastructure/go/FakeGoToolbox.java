@@ -1,4 +1,4 @@
-package io.github.dekkerding.engine.infrastructure.golang;
+package io.github.dekkerding.engine.infrastructure.go;
 
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
@@ -13,11 +13,14 @@ import java.nio.charset.StandardCharsets;
  * 但单测不该依赖 Go 工具链在场——用 java 起一个同协议的对端，行为完全可控：
  * <ul>
  *   <li>sys.ping → 立即回 pong</li>
- *   <li>sleep.forever → 永不回（构造超时分支）</li>
- *   <li>die.now → 直接 System.exit（构造进程死亡/毒丸分支）</li>
- *   <li>echo.* → 回显 params（构造通用往返）</li>
+ *   <li>sleep.forever → 延迟 2s 回（构造超时 + 迟到帧双分支）</li>
+ *   <li>die.now → 直接 System.exit（构造进程死亡/毒丸分支，2.5 用）</li>
+ *   <li>echo.* → 回显（构造通用往返）</li>
  * </ul>
  * 真实 Go 二进制的端到端验证归 channelIT 式集成轨（与 python 通道同一分离策略）。
+ *
+ * <p>【帧形状约定】GoProtocol.Response.result 是 Map——所有 result 帧必须是
+ * JSON 对象（`"result":{...}`），裸字符串会反序列化失败。
  */
 public class FakeGoToolbox {
 
@@ -43,16 +46,18 @@ public class FakeGoToolbox {
                         respond(out, "{\"id\":" + id + ",\"result\":{\"status\":\"pong\"}}");
                         break;
                     case "echo.upper":
-                        respond(out, "{\"id\":" + id + ",\"result\":\"ECHO\"}");
+                        respond(out, "{\"id\":" + id + ",\"result\":{\"echo\":\"ECHO\"}}");
                         break;
                     case "sleep.forever":
-                        // 超时分支：调用方 1s 超时放弃后，这里在 2s 补发"迟到帧"
-                        // ——既构造超时，又让后续调用必须丢弃这帧才能拿到自己的响应
-                        Thread.sleep(2_000);
-                        respond(out, "{\"id\":" + id + ",\"result\":\"late\"}");
+                        // 超时分支：调用方 1s 超时放弃后，这里在 1.2s 补发"迟到帧"
+                        // ——既构造超时（1.2 > 1.0），又让后续调用必须丢弃这帧才能拿到
+                        // 自己的响应。取 1.2s 而非更长：紧跟的下一次调用同样 1s 超时，
+                        // 迟到帧必须在其 deadline（约 2s）前落地，留 0.8s 抗调度抖动裕度
+                        Thread.sleep(1_200);
+                        respond(out, "{\"id\":" + id + ",\"result\":{\"late\":true}}");
                         break;
                     case "die.now":
-                        respond(out, "{\"id\":" + id + ",\"result\":\"dying\"}");
+                        respond(out, "{\"id\":" + id + ",\"result\":{\"status\":\"dying\"}}");
                         out.flush();
                         System.exit(0);
                         break;

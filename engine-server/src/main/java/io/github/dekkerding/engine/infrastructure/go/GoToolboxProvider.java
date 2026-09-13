@@ -7,6 +7,7 @@ import io.github.dekkerding.engine.domain.model.vector.EmbeddingModality;
 import io.github.dekkerding.engine.infrastructure.go.protocol.GoProtocol;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
@@ -15,8 +16,13 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * 装配两级门控（D7）：Profile("go-toolbox") 让 python provider 让位（避免同模态重复注册），
+ * engine.go.enabled=true 保证通道在场——双条件缺一不可：只开 Profile 没通道会装配失败。
+ */
 @Component
 @Profile("go-toolbox")
+@ConditionalOnProperty(name = "engine.go.enabled", havingValue = "true")
 public class GoToolboxProvider implements EmbeddingProvider {
 
     private static final Logger log = LoggerFactory.getLogger(GoToolboxProvider.class);

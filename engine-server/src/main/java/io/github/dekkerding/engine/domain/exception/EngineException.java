@@ -60,4 +60,9 @@ public class EngineException extends RuntimeException {
     public static EngineException downstream(String message, Throwable cause) {
         return new EngineException(503, message, cause);
     }
+
+    /** 503：下游依赖不可用（无底层 cause 的场景——子进程协议错误/超时等） */
+    public static EngineException downstream(String message) {
+        return new EngineException(503, message);
+    }
 }

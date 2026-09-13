@@ -1,4 +1,4 @@
-package io.github.dekkerding.engine.infrastructure.golang;
+package io.github.dekkerding.engine.infrastructure.go;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -13,9 +13,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Go 进程启动器单测 —— 任务 2.1 的验收点：
+ * Go 进程启动器单测 —— 任务 2.1 的验收点（D10 合并后随包迁移，定位链对齐手写版五级）：
  * 平台目录解析（os.name/os.arch → go 风格）、二进制命名、
- * classpath 解压的目标路径与"大小未变即复用"逻辑。
+ * classpath 解压的目标路径与"大小未变即复用"逻辑、配置直指的优先级与快败。
  *
  * <p>【测试策略】platformDir 是纯函数直接对表覆盖；解压逻辑用
  * src/test/resources 下的假二进制（golang/test-platform/toolbox）在
@@ -49,7 +49,7 @@ class GoProcessLauncherTest {
 
     @Test
     void 解压产物落在指定平台目录且可复用() throws IOException {
-        GoProcessLauncher launcher = new GoProcessLauncher("");
+        GoProcessLauncher launcher = new GoProcessLauncher("", "go");
         // test-platform 是测试资源里的虚构平台目录（fixture 假二进制）
         File extracted = launcher.ensureExtracted("test-platform", "toolbox");
         try {
@@ -70,33 +70,26 @@ class GoProcessLauncherTest {
 
     @Test
     void classpath无该平台时给出指导性错误() {
-        GoProcessLauncher launcher = new GoProcessLauncher("");
+        GoProcessLauncher launcher = new GoProcessLauncher("", "go");
         IOException e = assertThrows(IOException.class,
                 () -> launcher.ensureExtracted("no-such-platform", "toolbox"));
-        assertTrue(e.getMessage().contains("packageGolang") || e.getMessage().contains("engine.go.home"),
+        assertTrue(e.getMessage().contains("packageGolang") || e.getMessage().contains("engine.go.binary"),
                 "错误信息应包含修复指引，实际: " + e.getMessage());
     }
 
     @Test
-    void 配置home直指二进制优先于解压(@TempDir File tmp) throws IOException {
+    void 配置binary直指文件优先于一切(@TempDir File tmp) throws IOException {
         File binary = new File(tmp, "toolbox.exe");
         Files.write(binary.toPath(), new byte[]{1, 2, 3});
-        GoProcessLauncher launcher = new GoProcessLauncher(binary.getAbsolutePath());
-        assertEquals(binary.getCanonicalFile(), launcher.resolveBinary().getCanonicalFile());
-
-        // home 指目录时拼平台二进制名
-        File dir = new File(tmp, "plat");
-        assertTrue(dir.mkdir());
-        File inDir = new File(dir, "toolbox.exe");
-        Files.write(inDir.toPath(), new byte[]{4, 5, 6});
-        GoProcessLauncher launcherDir = new GoProcessLauncher(dir.getAbsolutePath());
-        assertEquals(inDir.getCanonicalFile(), launcherDir.resolveBinary().getCanonicalFile());
+        GoProcessLauncher launcher = new GoProcessLauncher(binary.getAbsolutePath(), "go");
+        assertEquals(binary.getCanonicalPath(), launcher.resolve().command().get(0));
     }
 
     @Test
-    void 配置home不存在时快速失败(@TempDir File tmp) {
-        GoProcessLauncher launcher = new GoProcessLauncher(new File(tmp, "ghost.exe").getAbsolutePath());
-        assertThrows(IOException.class, launcher::resolveBinary);
+    void 配置binary不存在时快速失败(@TempDir File tmp) {
+        GoProcessLauncher launcher =
+                new GoProcessLauncher(new File(tmp, "ghost.exe").getAbsolutePath(), "go");
+        assertThrows(IOException.class, launcher::resolve);
     }
 
     // ---- 辅助 ----

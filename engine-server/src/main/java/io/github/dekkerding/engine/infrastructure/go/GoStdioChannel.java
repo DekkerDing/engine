@@ -1,9 +1,11 @@
 package io.github.dekkerding.engine.infrastructure.go;
 
+import io.github.dekkerding.engine.domain.exception.EngineException;
 import io.github.dekkerding.engine.infrastructure.go.protocol.GoProtocol;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import javax.annotation.PostConstruct;
@@ -31,19 +33,34 @@ import java.util.concurrent.atomic.AtomicLong;
  *   <li>吞吐由批量接口消化</li>
  * </ul>
  *
- * <p>【与 StdioChannel 的差异】
+ * <p>【故障语义（合并自已测初版，spec「进程生命周期与故障语义」）】
  * <ul>
- *   <li>不需要 ping 探活——Go 引擎启动即就绪（无模型加载阶段）</li>
- *   <li>请求帧用 GoProtocol.Request（method + params），而非 op 名 + op 专用 payload</li>
- *   <li>不区分 Py4j/stdio Profile——Go 只有 stdio</li>
+ *   <li>毒丸：读线程见 EOF 投 {@code __PROCESS_EXITED__}，在途/后续调用立即失败</li>
+ *   <li>超时：poll(剩余时间) 阻塞等待——不忙等不烧 CPU；超时即抛 EngineException</li>
+ *   <li>迟到帧：超时被放弃的调用，其响应帧晚到时 id &lt; 当前期望——记 warn 丢弃，
+ *       绝不误配给下一个调用（串行模型下的防御性自愈）</li>
+ *   <li>错误帧：转 {@link EngineException#downstream}——走全局异常体系，
+ *       调用方拿到的是与 Python 通道同纪律的"下游引擎错误"</li>
  * </ul>
+ *
+ * <p>【装配条件】engine.go.enabled=true 才成为 Bean：默认配置零进程零 Bean，
+ * 「默认零变化」的通道层保证（手写初版的无条件 @Component 会在无 Go 环境炸启动，已修）。
  */
 @Component
+@ConditionalOnProperty(name = "engine.go.enabled", havingValue = "true")
 public class GoStdioChannel implements GoChannel {
 
     private static final Logger log = LoggerFactory.getLogger(GoStdioChannel.class);
 
-    private final GoProcessLauncher launcher;
+    /** 读线程投递的毒丸行：进程退出后在途调用立即失败（对齐 StdioChannel） */
+    static final String POISON_PILL = "__PROCESS_EXITED__";
+
+    /** 测试注入口：生产态由 Spring 注入的 launcher 供应，测试态直给假进程 */
+    interface ProcessSupplier {
+        Process get() throws IOException;
+    }
+
+    private final ProcessSupplier processSupplier;
     private final long timeoutSeconds;
 
     private Process process;
@@ -51,9 +68,15 @@ public class GoStdioChannel implements GoChannel {
     private final BlockingQueue<String> responseQueue = new ArrayBlockingQueue<>(16);
     private final AtomicLong requestId = new AtomicLong();
 
+    /** 生产构造：Spring 装配（launcher 拉起真实 Go 子进程）。 */
     public GoStdioChannel(GoProcessLauncher launcher,
                           @Value("${engine.go.stdio-timeout-seconds:60}") long timeoutSeconds) {
-        this.launcher = launcher;
+        this(launcher::launch, timeoutSeconds);
+    }
+
+    /** 测试构造：注入假进程供应器（FakeGoToolbox 等），不起真实引擎。 */
+    GoStdioChannel(ProcessSupplier processSupplier, long timeoutSeconds) {
+        this.processSupplier = processSupplier;
         this.timeoutSeconds = timeoutSeconds;
     }
 
@@ -75,20 +98,22 @@ public class GoStdioChannel implements GoChannel {
     public synchronized void start() throws IOException {
         if (isAlive()) return;
 
-        process = launcher.launch();
-        writer = new BufferedWriter(new OutputStreamWriter(process.getOutputStream(), StandardCharsets.UTF_8));
+        Process p = processSupplier.get();
+        process = p;
+        writer = new BufferedWriter(new OutputStreamWriter(p.getOutputStream(), StandardCharsets.UTF_8));
 
-        // 常驻读线程：一行一个 JSON 响应帧 → 队列
+        // 常驻读线程：一行一个 JSON 响应帧 → 队列（捕获局部 p，规避 close() 置空竞态）
         Thread reader = new Thread(() -> {
             try (BufferedReader r = new BufferedReader(
-                    new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+                    new InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8))) {
                 String line;
                 while ((line = r.readLine()) != null) {
                     responseQueue.offer(line);
                 }
             } catch (Exception ignored) {
+                // 进程退出时流关闭走到这里，属正常路径
             } finally {
-                responseQueue.offer("__PROCESS_EXITED__");
+                responseQueue.offer(POISON_PILL);
             }
         }, "toolbox-reader");
         reader.setDaemon(true);
@@ -117,15 +142,32 @@ public class GoStdioChannel implements GoChannel {
         try {
             call("sys.shutdown", new HashMap<>());
         } catch (Exception ignored) {
+            // 关闭路径尽人事：发不出（进程已死/已关）就直接走 stop
         }
-        launcher.stop(process);
+        if (process != null) {
+            launcherLikeStop(process);
+        }
         process = null;
         writer = null;
     }
 
+    /** 生产态经 launcher.stop（5s 优雅 + 强杀）；测试态进程自管，这里只 destroy。 */
+    private void launcherLikeStop(Process p) {
+        p.destroy();
+        try {
+            if (!p.waitFor(5, TimeUnit.SECONDS)) {
+                p.destroyForcibly();
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            p.destroyForcibly();
+        }
+    }
+
     @Override
     public boolean isAlive() {
-        return process != null && process.isAlive();
+        Process p = process;
+        return p != null && p.isAlive();
     }
 
     @Override
@@ -133,8 +175,11 @@ public class GoStdioChannel implements GoChannel {
         return call(method, params);
     }
 
-    /** 核心通信：序列化请求 → stdin → 队列取响应 → 反序列化 */
+    /** 核心通信：序列化请求 → stdin → 队列取响应 → 反序列化。 */
     private synchronized GoProtocol.Response call(String method, Map<String, Object> params) {
+        if (writer == null) {
+            throw EngineException.downstream("Go 通道未运行（未启动或已关闭），method=" + method);
+        }
         long id = requestId.incrementAndGet();
 
         // 写请求到 stdin
@@ -148,35 +193,47 @@ public class GoStdioChannel implements GoChannel {
             writer.newLine();
             writer.flush();
         } catch (IOException e) {
-            throw new IllegalStateException("Go engine write failed: " + e.getMessage(), e);
+            throw EngineException.downstream("Go 引擎写入失败: " + e.getMessage());
         }
 
-        // 从队列取响应（带超时）
+        // 阻塞式限时等待：poll(剩余毫秒)——不忙等（合并自已测初版的免忙等硬化）
         long deadline = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(timeoutSeconds);
-        while (System.currentTimeMillis() < deadline) {
-            String line = responseQueue.poll();
-            if (line == null) {
-                sleepQuietly(10);
-                continue;
+        while (true) {
+            long remaining = deadline - System.currentTimeMillis();
+            if (remaining <= 0) {
+                throw EngineException.downstream(
+                        "Go 引擎调用超时（" + timeoutSeconds + "s）: " + method);
             }
-            if ("__PROCESS_EXITED__".equals(line)) {
-                throw new IllegalStateException("Go engine process exited unexpectedly");
+            String line;
+            try {
+                line = responseQueue.poll(remaining, TimeUnit.MILLISECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw EngineException.downstream("等待 Go 引擎响应被中断: " + method);
+            }
+            if (line == null) {
+                continue; // poll 到点返回 null——循环顶再判剩余时间，精确超时
+            }
+            if (POISON_PILL.equals(line)) {
+                throw EngineException.downstream("Go 引擎进程已退出（调用 " + method + " 失败）");
             }
             GoProtocol.Response resp = GoProtocol.parseResponse(line);
-            if (resp.id != id) {
-                // 响应 id 不匹配（理论上串行模型不会发生，防御性处理）
-                log.warn("response id mismatch: expected={} got={}", id, resp.id);
+            if (resp.id < id) {
+                // 迟到帧：上一次超时被放弃的调用的响应——丢弃自愈，绝不误配
+                log.warn("丢弃迟到响应帧: id={}（当前期望 {}）", resp.id, id);
                 continue;
             }
+            if (resp.id > id) {
+                // 串行模型下不该出现——出现即协议错乱，快败好过错配
+                throw EngineException.downstream(
+                        "Go 通道响应帧错乱: 期望 id=" + id + " 实际=" + resp.id);
+            }
             if (resp.isError()) {
-                throw new IllegalStateException(
-                        "Go engine error [" + resp.error.code + "]: " + resp.error.message);
+                throw EngineException.downstream(
+                        "Go 引擎错误 [code=" + resp.error.code + "]: " + resp.error.message);
             }
             return resp;
         }
-
-        throw new IllegalStateException(
-                "Go engine request timed out after " + timeoutSeconds + "s: " + method);
     }
 
     private void sleepQuietly(long millis) {
