@@ -39,7 +39,8 @@
 
 - [x] 4.1 删除 `engine-gateway/` 整目录，验证 `gradlew build` 全绿且仓库无残留引用（grep engine-gateway 仅剩 docs 与 openspec 历史）后 commit（锚点 4.1）
   - 实测：`gradlew build` 全绿（142 测试含）；构建体系（gradle/yml）无 gateway 残留，docker/ 引用由组 5 紧随处理
-- [ ] 4.2 清理 `.gitignore`/`.dockerignore` 中 gateway 条目，验证 `git status` 无意外文件暴露后 commit（锚点 4.2）
+- [x] 4.2 清理 `.gitignore`/`.dockerignore` 中 gateway 条目，验证 `git status` 无意外文件暴露后 commit（锚点 4.2）
+  - 实测：`.gitignore` 删 gateway 段（Go 网关注释 + 二进制 + logs-bootrun-gateway.txt），`.dockerignore` 删第 39-40 行 gateway 产物段并更新头部注释为单 JAR 表述、顺带清 logs-bootrun-gateway.txt；`git status` 仅两文件 M、0 untracked——无残留泄漏
 
 ## [W3] 5. Docker 与 Jenkinsfile —— 与组 4、6 并行编辑；docker build 验证须待 4.1 完成
 

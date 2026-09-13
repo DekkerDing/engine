@@ -43,8 +43,3 @@ lucene-index/
 # ===== 系统文件 =====
 .DS_Store
 Thumbs.db
-# ===== Go 网关（engine-gateway）=====
-# 二进制为本机构建产物；static/ 由 copyFrontendDist 从 frontend/dist 生成
-engine-gateway/engine-gateway
-engine-gateway/engine-gateway.exe
-engine-gateway/static/
