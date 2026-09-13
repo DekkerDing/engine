@@ -7,11 +7,11 @@
 
 ## [W0] 0. Checkpoint（前置，独占执行）
 
-- [ ] 0.1 提交当前 79 个 staged 文件作 checkpoint（commit message 主题：Go 网关替换），验证 `git status` 工作区干净后 commit（锚点 0.1）
+- [x] 0.1 提交当前 79 个 staged 文件作 checkpoint（commit message 主题：Go 网关替换），验证 `git status` 工作区干净后 commit（锚点 0.1）
 
 ## [W1] 1. server 侧合体能力（只增不删，仍 8081）—— 与组 2 并行
 
-- [ ] 1.1 前置检查：搜索 engine-server 是否已有 `WebMvcConfigurer`/资源 handler 配置，确认无冲突（有则合并方案记录到 design.md），验证方式为 grep 结果空或已记录合并结论；commit（锚点 1.1）
+- [x] 1.1 前置检查：搜索 engine-server 是否已有 `WebMvcConfigurer`/资源 handler 配置，确认无冲突（有则合并方案记录到 design.md），验证方式为 grep 结果空或已记录合并结论；commit（锚点 1.1）
 - [ ] 1.2 从 git HEAD 捞回 `WebStaticConfig`/`SpaFallbackResolver`/`AssetCacheFilter` 三件套，改包名入 `engine.interfaces.web`，修正注释引用，验证编译通过 `gradlew :engine-server:compileJava` 后 commit（锚点 1.2）
 - [ ] 1.3 新增 `ApiPrefixRewriteFilter`（OncePerRequestFilter + HttpServletRequestWrapper 同时覆写 getRequestURI/getServletPath，仅 `/api` 前缀生效，FilterRegistrationBean HIGHEST_PRECEDENCE），验证编译通过后 commit（锚点 1.3）
 - [ ] 1.4 `SystemController` 健康端点组装合体结构（server 恒 UP 自证 + gateway 段保留 + engine/documents 透传 + 整体 status 判定），验证启动后 `curl :8081/api/system/health` 返回 `{status, gateway, server, engine, documents}` 且 engine null 时整体 UP，commit（锚点 1.4）
