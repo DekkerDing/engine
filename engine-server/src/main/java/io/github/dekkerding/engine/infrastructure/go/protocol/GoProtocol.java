@@ -67,25 +67,21 @@ public final class GoProtocol {
         }
     }
 
-    /** vector.search */
+    /** vector.search（命中三元组：完整条目由 JVM 主索引回表——Go 是计算副本不存元数据） */
     public static class VectorSearchResult {
         public List<HitItem> hits = Collections.emptyList();
-        public long took;
+        public int count;
 
         public static class HitItem {
             public String document_id;
             public int chunk_index;
             public double score;
-            public String source_type;
-            public String model_key;
         }
     }
 
-    /** vector.similarity */
+    /** vector.similarity（Go 响应键为 score——与 vector.search 命中同名字段） */
     public static class SimilarityResult {
-        public double similarity;
-        public int dim_a;
-        public int dim_b;
+        public double score;
     }
 
     /** hashing.generate */

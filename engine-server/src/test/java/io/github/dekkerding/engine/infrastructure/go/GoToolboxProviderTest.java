@@ -143,24 +143,6 @@ class GoToolboxProviderTest {
     }
 
     @Test
-    void vectorSearch解析与参数传递() {
-        FakeGoChannel fake = new FakeGoChannel();
-        fake.enqueue("{\"id\":4,\"result\":{\"hits\":[{\"document_id\":\"d1\",\"chunk_index\":0,\"score\":0.873,\"source_type\":\"pdf\",\"model_key\":\"go-hash-degraded\"}],\"took\":12}}");
-        GoToolboxProvider provider = new GoToolboxProvider(fake);
-
-        List<GoProtocol.VectorSearchResult.HitItem> hits =
-                provider.vectorSearch(new double[]{0.1, 0.2}, 5, "pdf", "go-hash-degraded");
-
-        assertEquals("vector.search", fake.lastMethod);
-        assertEquals(5, fake.lastParams.get("top_k"));
-        assertEquals("pdf", fake.lastParams.get("source_type"));
-        assertEquals("go-hash-degraded", fake.lastParams.get("model_key"));
-        assertEquals(1, hits.size());
-        assertEquals("d1", hits.get(0).document_id);
-        assertEquals(0.873, hits.get(0).score, 1e-9);
-    }
-
-    @Test
     void generateHash解析与normalize参数() {
         FakeGoChannel fake = new FakeGoChannel();
         fake.enqueue("{\"id\":5,\"result\":{\"vector\":[0.5,0.5],\"dim\":2,\"degraded\":true,\"text\":\"你好\"}}");
@@ -238,18 +220,5 @@ class GoToolboxProviderTest {
 
         List<String> tokens = provider.tokenize("文本", "search");
         assertTrue(tokens.isEmpty(), "空 result 应容错为空集而非 NPE");
-    }
-
-    @Test
-    void vectorInsertDelete计数解析() {
-        FakeGoChannel fake = new FakeGoChannel();
-        fake.enqueue("{\"id\":10,\"result\":{\"inserted\":3}}");
-        fake.enqueue("{\"id\":11,\"result\":{\"deleted\":3}}");
-        GoToolboxProvider provider = new GoToolboxProvider(fake);
-
-        assertEquals(3, provider.vectorInsert("d1", new ArrayList<>()));
-        assertEquals("vector.insert", fake.lastMethod);
-        assertEquals(3, provider.vectorDelete("d1"));
-        assertEquals("vector.delete", fake.lastMethod);
     }
 }

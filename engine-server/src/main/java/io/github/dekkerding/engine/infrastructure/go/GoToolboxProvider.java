@@ -89,44 +89,9 @@ public class GoToolboxProvider implements EmbeddingProvider {
     }
 
     // ========== vector.* ==========
-
-    public List<GoProtocol.VectorSearchResult.HitItem> vectorSearch(
-            double[] queryVec, int topK, String sourceType, String modelKey) {
-        Map<String, Object> params = new HashMap<>();
-        params.put("vector", toDoubleList(queryVec));
-        params.put("top_k", topK);
-        if (sourceType != null) params.put("source_type", sourceType);
-        if (modelKey != null) params.put("model_key", modelKey);
-        GoProtocol.Response resp = channel.send("vector.search", params);
-        GoProtocol.VectorSearchResult r = GoProtocol.extractResult(resp, GoProtocol.VectorSearchResult.class);
-        return r != null ? r.hits : new ArrayList<>();
-    }
-
-    public int vectorInsert(String documentId, List<Map<String, Object>> entries) {
-        Map<String, Object> params = new HashMap<>();
-        params.put("document_id", documentId);
-        params.put("entries", entries);
-        GoProtocol.Response resp = channel.send("vector.insert", params);
-        Object inserted = resp.result != null ? resp.result.get("inserted") : 0;
-        return inserted instanceof Number ? ((Number) inserted).intValue() : 0;
-    }
-
-    public int vectorDelete(String documentId) {
-        Map<String, Object> params = new HashMap<>();
-        params.put("document_id", documentId);
-        GoProtocol.Response resp = channel.send("vector.delete", params);
-        Object deleted = resp.result != null ? resp.result.get("deleted") : 0;
-        return deleted instanceof Number ? ((Number) deleted).intValue() : 0;
-    }
-
-    public double vectorSimilarity(double[] a, double[] b) {
-        Map<String, Object> params = new HashMap<>();
-        params.put("vector_a", toDoubleList(a));
-        params.put("vector_b", toDoubleList(b));
-        GoProtocol.Response resp = channel.send("vector.similarity", params);
-        GoProtocol.SimilarityResult r = GoProtocol.extractResult(resp, GoProtocol.SimilarityResult.class);
-        return r != null ? r.similarity : 0.0;
-    }
+    // 索引副本的复制与检索协议已迁至 GoVectorReplica（场景二只认第一级开关
+    // engine.go.enabled，与本类的 go-toolbox Profile 双条件无关——职责分离：
+    // 本类是 EmbeddingProvider 端口的降级实现 + text.* 门面）。
 
     // ========== hashing.* ==========
 
@@ -150,11 +115,5 @@ public class GoToolboxProvider implements EmbeddingProvider {
     public GoProtocol.StatsResult stats() {
         GoProtocol.Response resp = channel.send("sys.stats", new HashMap<>());
         return GoProtocol.extractResult(resp, GoProtocol.StatsResult.class);
-    }
-
-    private static List<Double> toDoubleList(double[] arr) {
-        List<Double> list = new ArrayList<>(arr.length);
-        for (double v : arr) list.add(v);
-        return list;
     }
 }

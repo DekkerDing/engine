@@ -137,15 +137,19 @@ func (idx *Index) Replace(documentID string, entries []Entry) {
 	idx.size += len(indexed)
 }
 
-// Remove 删除一个文档的全部向量条目（文档删除联动清理）。
-func (idx *Index) Remove(documentID string) {
+// Remove 删除一个文档的全部向量条目（文档删除联动清理），返回删除的条目数。
+// 幂等：删除不存在的文档返回 0（Java 侧"幂等双删无害"同款）。
+func (idx *Index) Remove(documentID string) int {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 
-	if old, existed := idx.byDocument[documentID]; existed {
-		idx.size -= len(old)
-		delete(idx.byDocument, documentID) // 【教学注释】delete 是内置函数，删 map 的键
+	old, existed := idx.byDocument[documentID]
+	if !existed {
+		return 0
 	}
+	idx.size -= len(old)
+	delete(idx.byDocument, documentID) // 【教学注释】delete 是内置函数，删 map 的键
+	return len(old)
 }
 
 // ============================================================================

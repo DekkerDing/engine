@@ -158,9 +158,9 @@ func (e *Engine) vectorDelete(params json.RawMessage) (interface{}, *protocol.Er
 	if p.DocumentID == "" {
 		return nil, &protocol.ErrorObject{Code: 1002, Message: "vector.delete 缺少必填参数 document_id"}
 	}
-	e.index.Remove(p.DocumentID)
+	removed := e.index.Remove(p.DocumentID)
 	return map[string]interface{}{
-		"deleted": p.DocumentID,
+		"removed": removed, // 删除条数（0 = 该文档本就不在——幂等）
 		"total":   e.index.Size(),
 	}, nil
 }

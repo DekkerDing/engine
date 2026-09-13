@@ -4,9 +4,11 @@ import io.github.dekkerding.engine.domain.exception.EngineException;
 import io.github.dekkerding.engine.domain.model.vector.VectorEntry;
 import io.github.dekkerding.engine.domain.model.vector.VectorHit;
 import io.github.dekkerding.engine.domain.repository.VectorStore;
+import io.github.dekkerding.engine.infrastructure.go.GoVectorReplica;
 import io.github.dekkerding.engine.infrastructure.search.InMemoryVectorIndex;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.core.annotation.Order;
@@ -20,6 +22,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.TreeMap;
 
 /**
@@ -47,10 +50,23 @@ public class SqliteVectorStore implements VectorStore {
     private static final Logger log = LoggerFactory.getLogger(SqliteVectorStore.class);
 
     private final SqliteConnectionManager connectionManager;
-    private final InMemoryVectorIndex index = new InMemoryVectorIndex();
+    private final InMemoryVectorIndex index;
 
+    /** 既有构造（无 Go 副本）：关闭态与既有直构测试的行为保持不变。 */
     public SqliteVectorStore(SqliteConnectionManager connectionManager) {
+        this(connectionManager, Optional.empty());
+    }
+
+    /**
+     * 生产构造：engine.go.enabled=true 时注入 Go 副本客户端——检索经主索引路由
+     * 到 Go 并行扫描（见 InMemoryVectorIndex 的 Go 轨路由注释）。
+     * Optional 注入而非 @Autowired(required=false)：缺席语义一目了然。
+     */
+    @Autowired
+    public SqliteVectorStore(SqliteConnectionManager connectionManager,
+                             Optional<GoVectorReplica> goReplica) {
         this.connectionManager = connectionManager;
+        this.index = goReplica.map(InMemoryVectorIndex::new).orElseGet(InMemoryVectorIndex::new);
     }
 
     /**
