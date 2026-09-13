@@ -5,7 +5,7 @@
 ## 1. Go 工程骨架与协议框架
 
 - [x] 1.1 创建 `engine-server/golang/`（`go.mod` 钉 Go 版本下限、`cmd/toolbox/main.go`、`internal/protocol/`、`internal/router/`），文件头带【教学注释 · Go vs Java 对照】块；验证：`cd engine-server/golang && go build ./... && go vet ./...` 通过（实测 go1.27.1 BUILD_VET_OK；结构含 internal/engine 门面，对齐手工改写的 main.go 三步装配）
-- [ ] 1.2 实现 JSON 行协议循环（stdin 逐行读请求帧、stdout 写响应帧、日志走 stderr、未知 method 返回同 id error 且进程不退出）；验证：手工管道测试 `echo '{"id":1,"method":"sys.ping","params":{}}' | ./toolbox` 返回 `{"id":1,"result":...}`，再跟一帧未知方法验证不退出
+- [x] 1.2 实现 JSON 行协议循环（stdin 逐行读请求帧、stdout 写响应帧、日志走 stderr、未知 method 返回同 id error 且进程不退出）；验证：手工管道测试 `echo '{"id":1,"method":"sys.ping","params":{}}' | ./toolbox` 返回 `{"id":1,"result":...}`，再跟一帧未知方法验证不退出（实测：四帧管道全过——ping→pong(0.2.0)；未知方法→1001 且进程存活；坏帧→1002(id=0)；EOF 退出码 0）
 - [ ] 1.3 实现 `sys.shutdown`（优雅退出）与启动横幅（版本/平台/GOMAXPROCS 打 stderr）；验证：发送 shutdown 帧后进程退出码 0，stdin EOF 同效
 
 ## 2. Java 侧通道与装配开关
