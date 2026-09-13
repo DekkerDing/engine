@@ -18,7 +18,6 @@ package vector
 
 import (
 	"math"
-	"sort"
 	"sync"
 )
 
@@ -219,10 +218,10 @@ func (idx *Index) Search(queryVec []float64, topK int, sourceType, modelKey stri
 		}
 	}
 
-	// 按分数降序排序
-	sort.Slice(hits, func(i, j int) bool {
-		return hits[i].Score > hits[j].Score
-	})
+	// 按全序排序（量化分数降序 + 平分 document_id/chunk_index 字典序——
+	// 与 SearchParallel 共用 sortHits，串行/并行定序合同逐字相同，
+	// 对拍测试才有意义）
+	sortHits(hits)
 
 	// 截断 Top-K
 	if topK < len(hits) {

@@ -94,10 +94,11 @@ func (e *Engine) RegisterAll(r *router.Router) {
 	// ---- hashing.* 场景三：降级向量化（任务 3.2）----
 	r.Register("hashing.generate", e.hashingGenerate)
 
-	// ---- vector.* 场景二：索引副本（任务 4.1；search 并行扫描归 4.2）----
+	// ---- vector.* 场景二：索引副本（任务 4.1；search 并行扫描 4.2）----
 	r.Register("vector.insert", e.vectorInsert)
 	r.Register("vector.delete", e.vectorDelete)
 	r.Register("vector.similarity", e.vectorSimilarity)
+	r.Register("vector.search", e.vectorSearch)
 
 	// ---- sys.stats 引擎自描述（任务 3.2）----
 	// tools 取 r.Methods()（闭包延迟求值——运行期调用时已含 sys.stats 自身）。
@@ -187,6 +188,51 @@ func (e *Engine) vectorSimilarity(params json.RawMessage) (interface{}, *protoco
 	}
 	return map[string]interface{}{
 		"score": vector.CosineSimilarity(p.VectorA, p.VectorB),
+	}, nil
+}
+
+// vectorSearchParams vector.search 的参数视图。
+// source_type/model_key 空串 = 不过滤（与 Index 空间闸门的空值语义一致）。
+type vectorSearchParams struct {
+	Query      []float64 `json:"query"`
+	TopK       int       `json:"top_k"`
+	SourceType string    `json:"source_type"`
+	ModelKey   string    `json:"model_key"`
+}
+
+// vectorSearch vector.search：并行分片 Top-K 余弦检索（高计算场景二的主方法）。
+// 命中只回 (document_id, chunk_index, score) 三元组——Go 端是计算副本，
+// 条目的完整信息（文本/降级标志等）由 Java 端主索引持有，按三元组回表。
+type vectorSearchHit struct {
+	DocID    string  `json:"document_id"`
+	ChunkIdx int     `json:"chunk_index"`
+	Score    float64 `json:"score"`
+}
+
+func (e *Engine) vectorSearch(params json.RawMessage) (interface{}, *protocol.ErrorObject) {
+	var p vectorSearchParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, &protocol.ErrorObject{Code: 1002, Message: "vector.search 参数解析失败: " + err.Error()}
+	}
+	if len(p.Query) == 0 {
+		return nil, &protocol.ErrorObject{Code: 1002, Message: "vector.search 缺少必填参数 query"}
+	}
+	topK := p.TopK
+	if topK <= 0 {
+		topK = 10 // 与 Java 门面 search(query, topK) 的调用惯例默认一致
+	}
+	hits := e.index.SearchParallel(p.Query, topK, p.SourceType, p.ModelKey)
+	result := make([]vectorSearchHit, 0, len(hits)) // 空切片序列化为 [] 而非 null
+	for _, h := range hits {
+		result = append(result, vectorSearchHit{
+			DocID:    h.Entry.DocID,
+			ChunkIdx: h.Entry.ChunkIdx,
+			Score:    h.Score,
+		})
+	}
+	return map[string]interface{}{
+		"hits":  result,
+		"count": len(result),
 	}, nil
 }
 
