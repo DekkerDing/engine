@@ -7,17 +7,18 @@
 
 ## 1. 系统调用链全景
 
+> 单 JAR 合体（single-jar-consolidation 变更后）：一个 fat JAR、一个 Java 进程、一个 8090 端口
+> 承载全部入口能力。原 Go 网关职能（静态资源、SPA 回退、缓存头、健康聚合、/api 前缀）
+> 已内化为 engine-server 的 `interfaces.web` 三件套与控制器前缀映射。
+
 ### 1.1 检索请求（读路径）
 
 ```
 浏览器（React SPA）
   │  POST /api/search {"query": "红塔"}
   ▼
-engine-gateway (:8090)  ← Go/net/http 实现
-  │  ProxyHandler：剥 /api 前缀 → ReverseProxy 转发 127.0.0.1:8081/search
-  ▼
-engine-server (:8081)  ───────────────────────────────────────────
-  │  interfaces: SearchController        参数校验（@Valid）
+engine-server (:8090，唯一进程、唯一端口)  ──────────────────────────
+  │  interfaces: SearchController        参数校验（@Valid，@RequestMapping("/api/search")）
   │  application: SearchApplicationService
   │      ├─ Caffeine 缓存查询（命中直接返回）
   │      ├─ EmbeddingProvider.embedTexts(query)      ──┐ 查询向量化
@@ -34,9 +35,9 @@ Python 引擎（server 的子进程，环回 25335 / stdio）
 ### 1.2 摄取请求（写路径）
 
 ```
-浏览器 ──POST /api/documents (multipart)──▶ gateway(剥前缀转发)
-  ▼
-server interfaces: DocumentController     格式/大小校验 → 存文件 → 建 Document(UPLOADED) → 立即返回 ID
+浏览器 ──POST /api/documents (multipart)──▶ server interfaces: DocumentController
+  │                                        格式/大小校验（50MB 闸门在应用入口）→ 存文件
+  │                                        → 建 Document(UPLOADED) → 立即返回 ID
   ▼ (固定线程池异步)
 application: DocumentApplicationService   状态机推进（UPLOADED→PARSED→…→INDEXED / FAILED）
   ├─ CompositeDocumentParser  txt/docx/pdf 解析
@@ -50,8 +51,10 @@ application: DocumentApplicationService   状态机推进（UPLOADED→PARSED→
 ### 1.3 健康链路
 
 ```
-浏览器 ◀── /api/system/health ── gateway（自身 + UpstreamHealthService 周期探测 server 10s×3 次容错）
-                                        └─ 透传 server /system/health（server 自身 + Python 引擎状态 + 文档统计）
+浏览器 ◀── GET /api/system/health ── SystemController（进程内直调 SystemQueryService.aggregateHealth()，
+                                        实时计算无探测缓存；组装合体信封：
+                                        gateway 段恒 UP（段名保留兼容前端三卡片）、server 段同进程自证恒 UP、
+                                        engine 段语义化、documents 统计透传；整体判定坍缩为 engine 单维度）
 ```
 
 ---
@@ -59,45 +62,33 @@ application: DocumentApplicationService   状态机推进（UPLOADED→PARSED→
 ## 2. 模块与进程拓扑
 
 ```
-engine/（Gradle 多模块，一棵 IDEA 树看全所有源码）
-├── engine-server/                    # Spring Boot :8081 —— 业务服务
-│   ├── src/main/java/...             #   DDD 四层（纯 JVM）
+engine/（单 Gradle 工程，一棵 IDEA 树看全所有源码）
+├── engine-server/                    # Spring Boot :8090 —— 单 JAR 合体应用
+│   ├── src/main/java/...             #   DDD 四层 + interfaces.web 静态三件套（纯 JVM）
+│   ├── frontend/                     #   React 前端源码（server 的资产，src 之外）
+│   │   └── src/{api,layouts,pages,components,hooks}
+│   │       （构建产物经 build/frontend-static 进 jar 的 BOOT-INF/classes/static/）
 │   └── python/                       #   Python 引擎源码（server 的资产，src 之外）
 │       ├── server_py4j.py            #     Py4J 通道入口（主）
 │       ├── server_stdio.py           #     stdio 通道入口（备）
 │       └── core/{embeddings,registry,tokenizer}.py
-├── engine-gateway/                 # Go/net/http :8090 —— 聚合网关（v1.1 新实现）
-│   ├── main.go                        #   入口：路由注册 + HTTP Server
-│   ├── config.yaml                    #   网关配置（端口/上游/健康/静态）
-│   ├── internal/
-│   │   ├── config/config.go           #   YAML 配置加载
-│   │   ├── model/api_response.go      #   统一信封
-│   │   ├── handler/
-│   │   │   ├── proxy.go               #   反代（ReverseProxy + 流式透传 + 大小闸门）
-│   │   │   ├── static.go              #   静态资源 + SPA 回退
-│   │   │   └── health.go              #   健康聚合 + 周期探测
-│   │   └── middleware/cache.go        #   缓存头中间件
-│   └── static/                        #   前端 dist/ 产物
-├── engine-gateway/                   # 旧 Java 网关（参考，不再维护）
-│   ├── src/main/java/...             #   反代/静态资源/健康聚合
-│   └── frontend/                     #   React 前端源码
-│       └── src/{api,layouts,pages,components,hooks}
 ├── docker/                           # 部署资产（Dockerfile×2、entrypoint、模型预下载）
+├── Jenkinsfile                       # CI 流水线（Frontend → Test → Package → Image → Publish）
 ├── docs/                             # 工程文档（本文所在）
 └── openspec/                         # 规格与变更管理
 ```
 
 **多语言源码归属（决策：模块内、src 外）**：Python 与前端是所属模块的资产——
-`src/main` 保持纯 JVM 语义不被 node_modules 污染；构建产物照旧嵌入各自 jar
-（Python 脚本进 `engine-server.jar`，前端 dist 进 `engine-gateway.jar`）。
+`src/main` 保持纯 JVM 语义不被 node_modules 污染；构建产物照旧嵌入 jar
+（python 脚本与前端 dist 均进 `engine-server.jar` 的 `BOOT-INF/classes/`）。
+三个嵌套服务（python/frontend/Java 源码）归并为同一种归属模式，仓库根只此一个工程。
 
 **进程树**（部署形态）：
 
 ```
-entrypoint.sh (PID 1)
-├── java engine-server.jar
-│   └── python server_py4j.py    # 随 Java 启停（shutdown hook 优雅终止）
-└── engine-gateway               # Go static binary
+entrypoint.sh (exec 让渡 PID 1)
+└── java engine-server.jar (:8090)
+    └── python server_py4j.py / server_stdio.py   # 随 Java 启停（shutdown hook 优雅终止）
 ```
 
 ---
@@ -107,7 +98,7 @@ entrypoint.sh (PID 1)
 ### 3.1 依赖方向（只能向下，禁止反向）
 
 ```
-interfaces（REST 适配器）      ← 外部世界进来的第一站
+interfaces（REST 适配器 + Web 静态三件套）  ← 外部世界进来的第一站
     │  调用
     ▼
 application（用例编排）         ← "上传文档到可检索"这类业务流程
@@ -128,10 +119,10 @@ infrastructure（技术细节）      ← SQLite/Lucene/Python 进程/文件解�
 
 | 层 | 包 | 职责 | 代表类 |
 |----|-----|------|--------|
-| interfaces | `interfaces.rest` | REST 端点、@Valid 校验、ApiResponse 信封、全局异常 → 错误码 | `DocumentController` `SearchController` `SystemController` `GlobalExceptionHandler` |
+| interfaces | `interfaces.rest` / `interfaces.web` | REST 端点（`/api` 前缀映射）、@Valid 校验、ApiResponse 信封、全局异常 → 错误码；静态资源三段 handler、SPA 回退、缓存头 | `DocumentController` `SearchController` `SystemController` `GlobalExceptionHandler` `WebStaticConfig` `SpaFallbackResolver` `AssetCacheFilter` |
 | application | `application` | 用例编排、事务边界、异步线程池、状态机推进、缓存 | `DocumentApplicationService` `SearchApplicationService` `SystemQueryService` |
 | domain | `domain.model` / `domain.service` / `domain.repository` | 实体与值对象、分块/向量化规则、端口接口、领域异常 | `Document` `TextChunk` `TextChunker` `EmbeddingProvider`（端口）`EngineException` |
-| infrastructure | `infrastructure.*` | SQLite 读写与迁移、内存向量索引、Lucene 全文、Python 双通道、文档解析 | `SqliteVectorStore` `InMemoryVectorIndex` `LuceneFullTextIndex` `FailoverChannel` `CompositeDocumentParser` |
+| infrastructure | `infrastructure.*` | SQLite 读写与迁移、内存向量索引、Lucene 全文、Python 双通道、文档解析 | `SqliteVectorStore` `InMemoryVectorIndex` `LuceneFullTextIndex` `FailoverChannel` `CompositeDocumentParser` `PythonProcessLauncher` |
 
 ### 3.3 Python 引擎的双通道结构
 
@@ -153,20 +144,19 @@ FailoverChannel (@Profile("failover")，通道选择器：组合，非继承)
 
 ---
 
-## 4. engine-gateway 内部结构（v1.1 Go 实现）
+## 4. 原网关职能的内化（interfaces.web 静态三件套）
 
-| 包/文件 | 职责 | 对照原 Java 类 |
-|---------|------|---------------|
-| `internal/handler/proxy.go` | `/api/**` 剥前缀反代 8081，httputil.ReverseProxy 流式透传（SSE-ready），55MB 上传闸门 | `ProxyController.java` |
-| `internal/handler/static.go` | 静态资源、SPA 回退（4 分支：`/` / 文件存在 / 目录 / 前端路由→index.html）、hash 资产长缓存 | `WebStaticConfig.java` + `SpaFallbackResolver.java` |
-| `internal/handler/health.go` | 周期探测 server（10s×3 次容错）聚合三组件健康，`sync.RWMutex` 保证线程安全 | `UpstreamHealthService.java` + `HealthController.java` |
-| `internal/middleware/cache.go` | `/assets/**` → `max-age=31536000,immutable`；`/index.html` → `no-cache` | `AssetCacheFilter.java` |
-| `internal/model/api_response.go` | 统一信封 `{code,message,data,timestamp}` | `ApiResponse.java` |
-| `internal/config/config.go` | YAML 配置加载（server/upstream/health/static/logging） | [application.yml](file:///F:/workspace/engine/engine-gateway/src/main/resources/application.yml) |
+Go 网关退役后，其四项职能由 engine-server 原生承担（对外契约逐字节不变）：
 
-网关为"哑管道"：不理解业务语义，body 原样透传给 server（`Director` 不读 body）。multipart 解析关闭。
-与 Java 版网关的 **契约完全一致**：端口 8090、路由规则、信封格式、健康 JSON 结构均不变。
-详见 [Go 网关设计文档](file:///F:/workspace/engine/docs/reqforge-gateway-go-design.md) 和 [Go 网关规约文档](file:///F:/workspace/engine/docs/reqforge-gateway-go-spec.md)。
+| 原网关组件 | 内化后的 Java 组件 | 契约要点 |
+|-----------|-------------------|----------|
+| `handler/proxy.go`（/api 剥前缀反代） | 控制器类级 `@RequestMapping("/api/...")` | API 全在 `/api/**` 命名空间，前端路由物理隔离（D1 终案——Filter 剥前缀会与同名前端路由冲突，实测推翻） |
+| `handler/static.go`（静态 + SPA 回退） | `WebStaticConfig` + `SpaFallbackResolver` | `/assets/**`、`/index.html`+`/favicon.ico`（noCache）、`/**` 兜底；`api/`、`actuator/` 前缀防御分支拒绝（404 不吞 HTML） |
+| `middleware/cache.go`（缓存头） | `AssetCacheFilter` | `/assets/*` → `public, max-age=31536000, immutable`；入口页 → `no-cache`；`/index.html` 200 直返无 301 |
+| `handler/health.go`（周期探测聚合） | `SystemController` 直调 `SystemQueryService` | 合体信封五段（gateway 段名保留兼容前端）；实时计算替代 10s 探测缓存 |
+
+路由命名空间全景与部署验收清单见 [reqforge-single-jar-spec.md](file:///F:/workspace/engine/docs/reqforge-single-jar-spec.md)；
+决策过程与被否决方案见 [reqforge-single-jar-design.md](file:///F:/workspace/engine/docs/reqforge-single-jar-design.md)。
 
 ---
 
@@ -199,12 +189,12 @@ lucene-index/          # 全文索引目录（SmartCN 分词）
 **跨模态链路**（与文本链路共用哪些、新开哪些）：
 
 ```
-上传：POST /images → ImageFormatGuard（白名单+魔数+20MB）→ 落盘 data/images/
+上传：POST /api/images → ImageFormatGuard（白名单+魔数+20MB）→ 落盘 data/images/
       → image_asset 建档（PENDING）→ 单线程池异步 vectorize
       → ClipEmbeddingProvider（共用 PythonChannel：Py4J 主/stdio 备）
       → 一图一向量入库（VECTORIZING→COMPLETED；degraded 透传）
 
-检索：POST /search {modality:"image"} → 查询文本经 CLIP 文本塔编码
+检索：POST /api/search {modality:"image"} → 查询文本经 CLIP 文本塔编码
       → 仅对 image 空间算余弦（单路直通，不碰全文索引）
       → 命中即缩略图卡片（score=余弦；阈值 0.25 独立于文本的 0.40）
 ```
@@ -232,5 +222,5 @@ provider 的配置键（`text-embedding-zh` / `clip`），而不是 Python 返�
 | D3 混合融合 | RRF（k=60），零调参 | `SearchApplicationService` |
 | D4 摄取异步 | 固定 2 线程池 + 状态机轮询 | 第 1.2 节 |
 | D5 通道回退 | Py4J 主 → stdio 惰性备 → 自动切回 | 第 3.3 节 |
-| D6 网关 | OkHttp 单例 + 三组件 | 第 4 节 |
-| D8 容器 | 单容器三进程、双构建轨 | `docs/deployment.md` |
+| D6 入口形态 | 单 JAR 单进程 :8090（网关退役，职能内化） | 第 4 节 + [合体设计](file:///F:/workspace/engine/docs/reqforge-single-jar-design.md) |
+| D8 容器 | 单容器单进程、双构建轨、exec PID 1 | `docs/deployment.md` |
