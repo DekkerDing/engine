@@ -36,6 +36,14 @@ __pycache__/
 .venv/
 python-runtime/
 
+# ===== Go =====
+# go-runtime/：GoProcessLauncher 从 jar classpath 解压二进制的落地目录（同 python-runtime/）
+go-runtime/
+# golang/toolbox(.exe)：开发轨 go build 直落工程根的二进制（launcher 定位链直用轨）——
+# 【gitignore 坑】含斜杠的路径模式锚定到 .gitignore 所在目录（仓库根），必须写全径
+engine-server/golang/toolbox
+engine-server/golang/toolbox.exe
+
 # ===== 运行时数据（SQLite 库、上传文件、Lucene 索引、模型缓存）=====
 data/
 lucene-index/
