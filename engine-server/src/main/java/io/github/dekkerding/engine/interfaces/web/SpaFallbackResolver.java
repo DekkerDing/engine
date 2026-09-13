@@ -38,10 +38,12 @@ public class SpaFallbackResolver extends PathResourceResolver {
 
     @Override
     protected Resource getResource(String resourcePath, Resource location) throws IOException {
-        // 防御分支：/api/** 理论上到不了这里（控制器映射直接带 /api 前缀，
-        // 优先级高于资源 handler 会先认领），但显式拒绝比依赖"优先级恰好正确"更稳——
-        // 万一控制器 mapping 变更，也不至于把 API 404 吞成 HTML 页面
-        if (resourcePath.startsWith("api/")) {
+        // 防御分支：API 与 actuator 路径不回退成 HTML——未匹配就是 404。
+        // /api/** 理论上到不了这里（控制器映射直接带 /api 前缀，优先级高于资源
+        // handler 会先认领），但显式拒绝比依赖"优先级恰好正确"更稳；
+        // /actuator/** 在 exposure 收敛（仅 health）后未暴露的端点会落到这里，
+        // 吞成 index.html 会掩盖 404 语义（spec「actuator 暴露收敛」要求 404）
+        if (resourcePath.startsWith("api/") || resourcePath.startsWith("actuator/")) {
             return null;   // null = 资源不存在 → 404
         }
 

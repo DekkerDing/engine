@@ -1,10 +1,11 @@
 # ============================================================
-# engine-server 配置（:8081）
+# engine-server 配置（单 JAR 合体，:8090 唯一端口）
 # 【教学注释】YAML 采用两空格缩进；同级键左对齐；冒号后必须有空格
 # ============================================================
 server:
-  # Java 核心服务端口：位于网关(:8090)之后，前端永远不直接访问本端口
-  port: 8081
+  # 唯一端口：静态资源 + /api/** + actuator 同源提供（原网关 8090 契约零变动；
+  # 双进程时代的 8081 随网关架构一起消失）
+  port: 8090
   servlet:
     encoding:
       # 全链路 UTF-8（Windows 默认 GBK，中文响应会乱码）
@@ -101,8 +102,9 @@ management:
   endpoints:
     web:
       exposure:
-        # 网关通过 /actuator/health 探测本服务存活
-        include: health,info,metrics
+        # 【单 JAR 合体】actuator 首次上公网端口（8090），只保留 health 供容器
+        # HEALTHCHECK 与部署脚本探测（:8090/actuator/health，与原网关兼容端点同路径）
+        include: health
 
 logging:
   level:

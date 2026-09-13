@@ -31,8 +31,9 @@
 
 ## [W2] 3. 端口切换与网关停用 —— 依赖组 1、2 全部完成
 
-- [ ] 3.1 `application.yml`：`server.port: 8090` + `management.endpoints.web.exposure.include: health`，验证启动日志监听 8090 后 commit（锚点 3.1）
-- [ ] 3.2 停用 engine-gateway 进程，单进程下复测：全前端路由、API 全链路、`:8090/actuator/health` 200、`:8090/actuator/metrics` 404、60MB 上传 400 code 1000 文案逐字一致、8081 无监听，全部通过后 commit（锚点 3.2）
+- [x] 3.1 `application.yml`：`server.port: 8090` + `management.endpoints.web.exposure.include: health`，验证启动日志监听 8090 后 commit（锚点 3.1）
+- [x] 3.2 停用 engine-gateway 进程，单进程下复测：全前端路由、API 全链路、`:8090/actuator/health` 200、`:8090/actuator/metrics` 404、60MB 上传 400 code 1000 文案逐字一致、8081 无监听，全部通过后 commit（锚点 3.2）
+  - 实测 10 项全过（Go 网关进程已停用，单 Java 进程承载全部）；附带修复：SpaFallbackResolver 防御分支扩展拒绝 `actuator/` 前缀（未暴露端点被 SPA 吞成 index.html 200 → 404 JSON，spec actuator 收敛要求）
 
 ## [W3] 4. 退役 Go 网关工程 —— 与组 5、6 并行编辑（验证串行：本组先于组 5 的 docker build）
 
