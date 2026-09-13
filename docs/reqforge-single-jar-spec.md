@@ -104,7 +104,7 @@ BASE=http://127.0.0.1:8090
 | 5 | 未匹配 API 不吞 HTML | `curl -s -o /dev/null -w '%{http_code}' $BASE/api/no-such` | `404`（JSON 信封） |
 | 6 | 聚合健康 | `curl -s $BASE/api/system/health` | `{status, gateway, server, engine, documents}` 五段信封 |
 | 7 | 业务 API | `curl -s -o /dev/null -w '%{http_code}' $BASE/api/requirements` | `200` |
-| 8 | 中文查询串 | `curl -s -o /dev/null -w '%{http_code}' "$BASE/api/search?q=%E6%B5%8B%E8%AF%95"` | `200`（参数解码正确） |
+| 8 | 中文查询串 | `curl -s -o /dev/null -w '%{http_code}' -X POST -H "Content-Type: application/json" -d '{"query":"测试"}' $BASE/api/search` | `200`（参数解码正确；注意 search 是 POST 端点，GET 会 405/500） |
 | 9 | 容器探测端点 | `curl -s $BASE/actuator/health` | `200` + `{"status":"UP"}` |
 | 10 | metrics 不外露 | `curl -s -o /dev/null -w '%{http_code}' $BASE/actuator/metrics` | `404`（不被 SPA 吞成 200） |
 | 11 | 超限上传 | 上传 60MB 文件到 `/api/documents` | `400` + `code:1000` + 文案逐字一致 |

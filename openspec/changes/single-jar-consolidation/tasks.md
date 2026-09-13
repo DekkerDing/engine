@@ -70,5 +70,7 @@
 
 ## [W4] 7. 终验 —— 依赖全部完成
 
-- [ ] 7.1 全量回归：`gradlew clean build` 全绿 + `java -jar` 冷启动全路由自测（对照 spec 自测清单逐项打勾），输出预期 vs 实际对比表，commit（锚点 7.1）
+- [x] 7.1 全量回归：`gradlew clean build` 全绿 + `java -jar` 冷启动全路由自测（对照 spec 自测清单逐项打勾），输出预期 vs 实际对比表，commit（锚点 7.1）
+  - 实测：`clean build` 全绿（1m45s，前端→jar→test 全链自动拉起，142 测试 0 失败）；`java -jar` 冷启动 21s 就绪，spec 13 项清单全过（第 8 项为清单命令笔误修正后复验：search 是 POST 端点，GET→500 快速失败系方法错误非缺陷；POST 中文检索 200 且真实命中中文文档、高亮无乱码；信封 items 字段完整）；附带修正 6.2 文档第 8 项命令 GET→POST
+  - **环境发现（已定位非缺陷）**：本机 Windows 动态端口范围为 1024-15000（`netsh int ipv4 show dynamicport tcp`），8090 落在临时端口池内——首次冷启动时 Python 加载模型的出站 HTTPS 连接恰被分派 8090 源端口（TIME_WAIT），Tomcat bind 报 PortInUse；等待 60s 后重试成功。冷启动竞态概率低但存在，处置=重试（已记入 deployment.md 排查表第 2 条语境）；首次聚合健康/actuator 探测瞬现 000 抖动与模型冷加载并发相关，重试即恢复
 - [ ] 7.2 遗留项清点（性能基准/灰度等不可本地验证项列入待办），验证清单与 openspec tasks 无未勾选实现项后 commit（锚点 7.2）
