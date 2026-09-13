@@ -3,8 +3,10 @@
 // ------------------------------------------------------------
 // 【阶段编排】Frontend → Test → Package → Image → Publish
 //   Frontend : npm install + vite build（产物 → build/frontend-static/）
-//   Test     : 142 项单测（JUnit 报告归档）
-//   Package  : bootJar 单 JAR 合体打包（前端产物 + python 脚本自动入 jar）
+//   Test     : 全量单测（JUnit 报告归档）
+//   Package  : bootJar 单 JAR 合体打包（前端产物 + python 脚本 + Go 双平台
+//              二进制自动入 jar：processResources 联动 copyFrontendDist +
+//              packagePython + packageGolang，无独立 Go 阶段——依赖链自动拉起）
 //   Image    : docker build 本地轨（COPY 上一步 jar，复用流水线内构建产物，
 //              不走 Dockerfile.full 容器内重复构建——全构建轨留给"仅有
 //              Docker"的复现场景）
@@ -12,8 +14,9 @@
 //
 // 【镜像 tag】text-vector-engine:${BUILD_NUMBER}，成功后追加 latest 指针
 //
-// 【节点要求】docker + JDK8 + Node；gradlew 经 wrapper 钉住 Gradle 7.6.4，
-//   节点无需预装 Gradle
+// 【节点要求】docker + JDK8 + Node + Go 1.21+（go.mod 钉的下限；节点无 Go 时
+//   buildGoToolbox warn 跳过不炸——但 jar 会缺 golang/ 二进制，生产节点必须装）；
+//   gradlew 经 wrapper 钉住 Gradle 7.6.4，节点无需预装 Gradle
 // ============================================================
 
 pipeline {
@@ -33,6 +36,9 @@ pipeline {
         REGISTRY        = ''
         // 国内加速（与本地开发一致的网络策略；节点在墙外可置空走官方源）
         NPM_REGISTRY    = 'https://registry.npmmirror.com'
+        // Go 模块代理：go.mod 零三方依赖（design D8）实际不触网下载，
+        // 置 GOPROXY 只是防御未来引入依赖时的国内加速（goproxy.cn 由七牛维护）
+        GOPROXY         = 'https://goproxy.cn'
         // Windows 仓库 CRLF 防御开关（gradlew 被 checkout 为 CRLF 时需去 CR）
         STRIP_CR        = 'true'
     }
@@ -70,9 +76,11 @@ pipeline {
 
         // ----------------------------------------------------
         // 3. Package — 单 JAR 合体 fat jar
-        //    （processResources 自动拉起 copyFrontendDist + packagePython：
-        //      前端产物 → BOOT-INF/classes/static/，
-        //      python 脚本 → BOOT-INF/classes/python/）
+        //    （processResources 自动拉起 copyFrontendDist + packagePython +
+        //      packageGolang（Go 双平台交叉编译在依赖链 buildGoToolbox）：
+        //      前端产物   → BOOT-INF/classes/static/，
+        //      python 脚本 → BOOT-INF/classes/python/，
+        //      Go 二进制  → BOOT-INF/classes/golang/{windows,linux}-amd64/）
         // ----------------------------------------------------
         stage('Package') {
             steps {
