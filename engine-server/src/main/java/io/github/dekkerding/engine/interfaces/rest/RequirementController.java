@@ -48,7 +48,7 @@ import java.util.zip.ZipOutputStream;
  * 下载流就是 data 本身；过期警示通过 X-Artifact-Stale 头传递。
  */
 @RestController
-@RequestMapping("/requirements")
+@RequestMapping("/api/requirements")
 public class RequirementController {
 
     private static final Logger log = LoggerFactory.getLogger(RequirementController.class);

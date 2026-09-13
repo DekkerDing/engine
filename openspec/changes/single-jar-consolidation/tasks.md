@@ -14,9 +14,11 @@
 - [x] 1.1 前置检查：搜索 engine-server 是否已有 `WebMvcConfigurer`/资源 handler 配置，确认无冲突（有则合并方案记录到 design.md），验证方式为 grep 结果空或已记录合并结论；commit（锚点 1.1）
 - [x] 1.2 从 git HEAD 捞回 `WebStaticConfig`/`SpaFallbackResolver`/`AssetCacheFilter` 三件套，改包名入 `engine.interfaces.web`，修正注释引用，验证编译通过 `gradlew :engine-server:compileJava` 后 commit（锚点 1.2）
 - [x] 1.3 新增 `ApiPrefixRewriteFilter`（OncePerRequestFilter + HttpServletRequestWrapper 同时覆写 getRequestURI/getServletPath，仅 `/api` 前缀生效，FilterRegistrationBean HIGHEST_PRECEDENCE），验证编译通过后 commit（锚点 1.3）
+  - **终案修正**：1.5 集成验证实测发现剥前缀后控制器裸路径与同名前端路由命名空间冲突（/search 等被 SearchController 抢走）——结构性不可修补，改 D1 终案「控制器映射直接带 /api 前缀」，本 Filter 已删除（见 design.md D1 实测推翻记录）
 - [x] 1.4 `SystemController` 健康端点组装合体结构（server 恒 UP 自证 + gateway 段保留 + engine/documents 透传 + 整体 status 判定），验证启动后 `curl :8081/api/system/health` 返回 `{status, gateway, server, engine, documents}` 且 engine null 时整体 UP，commit（锚点 1.4）
   - 实测：合体结构逐字段正确（engine 语义化 {status:UP, detail:{...}}，overall UP，信封完整）；engine null 分支经代码审查确认（Go 版逻辑直译且 Go 版已实测）——当前架构 PythonChannel 为强制依赖，真实进程不可达该分支，作防御性契约保留
-- [ ] 1.5 集成验证（8081 双轨并存）：`curl :8081/`（200 HTML）、`:8081/search`（SPA 回退 200）、`:8081/assets/<hash>.js`（immutable 头）、`:8081/index.html`（200 + no-cache，无 301）、`:8081/api/no-such`（404 非 HTML）、带中文查询串 API 调用参数解码正确；全部通过后 commit（锚点 1.5）
+- [x] 1.5 集成验证（8081 双轨并存）：`curl :8081/`（200 HTML）、`:8081/search`（SPA 回退 200）、`:8081/assets/<hash>.js`（immutable 头）、`:8081/index.html`（200 + no-cache，无 301）、`:8081/api/no-such`（404 非 HTML）、带中文查询串 API 调用参数解码正确；全部通过后 commit（锚点 1.5）
+  - 实测 10 项全过（含 D1 终案修正后复验）：/、/search、/documents、/requirements 全 200 HTML；assets immutable；index.html 200 no-cache 无 301；/api/no-such 404 JSON；/api/system/health 合体信封；/api/requirements 200；中文查询串 200；142 单测全绿
 
 ## [W1] 2. 前端工程移入 engine-server 并迁移构建编排 —— 与组 1 并行
 
@@ -24,7 +26,8 @@
 - [x] 2.2 将 `npmInstall`/`buildFrontend`/`copyFrontendDist` 任务链迁入 `engine-server/build.gradle`（frontendDir 指向模块内新位置），产物直送 `src/main/resources/static/`（clean-first + fingerprint 跳过保留），验证 `gradlew :engine-server:buildFrontend :engine-server:copyFrontendDist` 后 static/ 出现 index.html 与 assets/，commit（锚点 2.2）
   - 实现细节修正：产物改走 `build/frontend-static/static/`（sourceSets 注册）而非直送 `src/main/resources/static/`——对齐 packagePython「build/ 中转不污染源码树」先例，jar 内路径不变（design.md D5 已同步）
 - [x] 2.3 根 `build.gradle` 移除前端任务与 gatewayStaticDir 引用；`.gitignore`/`.dockerignore` 的 `frontend/dist/` 改为 `engine-server/frontend/dist/`；`settings.gradle:15` 结构注释更新，验证 `gradlew tasks` 无悬空任务、全仓库 grep 无 `rootDir}/frontend` 旧路径后 commit（锚点 2.3）
-- [ ] 2.4 `gradlew :engine-server:bootJar` 后解包验证 `BOOT-INF/classes/static/index.html` 与 `assets/` 存在（jar 自包含），并 `java -jar` 冒烟 8081 全路由，commit（锚点 2.4）
+- [x] 2.4 `gradlew :engine-server:bootJar` 后解包验证 `BOOT-INF/classes/static/index.html` 与 `assets/` 存在（jar 自包含），并 `java -jar` 冒烟 8081 全路由，commit（锚点 2.4）
+  - 实测：jar 内 BOOT-INF/classes/static/{index.html, assets/}（5 条目）与 python/（21 条目）齐备；java -jar 从 engine-server/ 目录冷启动（./python 探测命中），全路由冒烟通过（同 1.5 清单）
 
 ## [W2] 3. 端口切换与网关停用 —— 依赖组 1、2 全部完成
 

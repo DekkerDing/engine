@@ -38,8 +38,8 @@ public class SpaFallbackResolver extends PathResourceResolver {
 
     @Override
     protected Resource getResource(String resourcePath, Resource location) throws IOException {
-        // 防御分支：/api/** 理论上到不了这里（ApiPrefixRewriteFilter 剥前缀后由
-        // @RequestMapping 控制器优先认领），但显式拒绝比依赖"优先级恰好正确"更稳——
+        // 防御分支：/api/** 理论上到不了这里（控制器映射直接带 /api 前缀，
+        // 优先级高于资源 handler 会先认领），但显式拒绝比依赖"优先级恰好正确"更稳——
         // 万一控制器 mapping 变更，也不至于把 API 404 吞成 HTML 页面
         if (resourcePath.startsWith("api/")) {
             return null;   // null = 资源不存在 → 404

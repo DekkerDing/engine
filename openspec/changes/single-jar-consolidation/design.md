@@ -26,21 +26,22 @@
 
 ## Decisions
 
-### D1: `/api` 前缀重写用 OncePerRequestFilter（否决三个替代方案）
+### D1: `/api` 路由策略——控制器映射直接带前缀（实测推翻 Filter 剥前缀初案）
 
-`HIGHEST_PRECEDENCE` 的 `OncePerRequestFilter` 匹配 `requestURI` 以 `/api` 开头时，用 `HttpServletRequestWrapper` 包装请求继续链——控制器、`@RequestMapping`、actuator、静态 handler 全部零改动。
+**初案**（规划阶段）：`HIGHEST_PRECEDENCE` 的 `OncePerRequestFilter` 剥 `/api` 前缀 + Wrapper 覆写 `getRequestURI()`/`getServletPath()`，控制器零改动。
 
-**Wrapper 必须同时覆写 `getRequestURI()` 与 `getServletPath()`**（Spring MVC 映射依据二者；只覆写其一会出现部分 mapping 失效）。`getQueryString()` 不覆写（默认透传，query 原样）；不解码不重编码路径（`getRequestURI()` 返回原始编码串，剥前缀是纯字符串操作，百分号转义零漂移）。
+**实测推翻**（任务 1.5 集成验证）：剥前缀后控制器裸路径（`/search`、`/documents`、`/requirements`、`/images`）与**同名前端路由**在同进程命名空间合并——controller 优先级永远高于静态资源 handler，浏览器 F5 刷新 `/search` 被 `SearchController` 抢走（500 JSON 而非 index.html）。原网关架构下两者靠 `/api` 前缀物理隔离，合体后冲突结构性存在，Filter 方案无法修补。
 
-否决的替代方案：
+**终案**：6 个控制器类级 `@RequestMapping` 直接加 `/api` 前缀（各 1 行），删除剥前缀 Filter。命名空间天然分离（API 全在 `/api/**`，前端路由不可能是 `/api/**`）；`SpaFallbackResolver` 的 `api/` 防御分支恰好归位——未匹配的 `/api/no-such` 落入资源链时被防御分支拒绝 → 404 不吞成 HTML。对外契约（`:8090/api/**`）不变。
+
+仍否决的替代方案：
 
 | 方案 | 否决原因 |
 |------|----------|
 | `server.servlet.context-path: /api` | 拖累静态资源与 actuator（它们也被迫挂 `/api` 下），与「页面与 API 同端口同源」冲突 |
 | 改前端 `baseURL` 三端 | 波及浏览器/APP/脚本全部调用方，违反「对外契约零变动」目标 |
-| server 内嵌自代理（RestTemplate/OkHttp 转发到自身 8081） | 同进程内多一跳环回 HTTP，纯性能税，且保留双端口复杂度 |
-
-精确 `/api`（无尾部分）剥后为空串→DispatcherServlet 404，与原网关 `StripPrefix` 行为等价（前端不会发起裸 `/api`）。
+| server 内嵌自代理（转发到自身） | 同进程内多一跳环回 HTTP，纯性能税，且保留双端口复杂度 |
+| Filter 剥前缀（初案） | 前端路由与控制器裸路径命名空间冲突（见上），结构性不可修补 |
 
 ### D2: 静态三件套从 git HEAD 捞回，改包名入 `engine.interfaces.web`
 

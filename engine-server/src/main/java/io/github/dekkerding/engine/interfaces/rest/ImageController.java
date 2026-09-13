@@ -50,7 +50,7 @@ import java.util.List;
  * ResponseEntity&lt;Resource&gt;，这是 REST 里"信封只包结构化数据"的常见例外。
  */
 @RestController
-@RequestMapping("/images")
+@RequestMapping("/api/images")
 public class ImageController {
 
     private static final Logger log = LoggerFactory.getLogger(ImageController.class);

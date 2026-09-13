@@ -31,7 +31,7 @@ import java.util.Map;
  * </pre>
  */
 @RestController
-@RequestMapping("/system")
+@RequestMapping("/api/system")
 public class SystemController {
 
     private final SystemQueryService systemQueryService;

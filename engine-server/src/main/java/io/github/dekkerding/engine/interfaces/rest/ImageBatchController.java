@@ -35,7 +35,7 @@ import java.util.List;
  * 导入场景足够（Flutter 端 1-2 秒一拉）。
  */
 @RestController
-@RequestMapping("/images")
+@RequestMapping("/api/images")
 public class ImageBatchController {
 
     private static final Logger log = LoggerFactory.getLogger(ImageBatchController.class);

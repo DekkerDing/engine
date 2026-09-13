@@ -26,7 +26,7 @@ import javax.validation.Valid;
  * POST 是更诚实的选择——REST 的动词看语义，不看"能不能用 GET 实现"。
  */
 @RestController
-@RequestMapping("/search")
+@RequestMapping("/api/search")
 public class SearchController {
 
     private final SearchApplicationService searchService;

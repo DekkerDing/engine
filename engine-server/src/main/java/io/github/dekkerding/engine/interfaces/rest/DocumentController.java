@@ -38,7 +38,7 @@ import java.util.List;
  * </pre>
  */
 @RestController
-@RequestMapping("/documents")
+@RequestMapping("/api/documents")
 public class DocumentController {
 
     private static final Logger log = LoggerFactory.getLogger(DocumentController.class);

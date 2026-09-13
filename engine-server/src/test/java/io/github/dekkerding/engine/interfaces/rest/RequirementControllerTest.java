@@ -70,10 +70,10 @@ class RequirementControllerTest {
         assertTrue(id.length() == 36, "UUID 长度: " + id);
 
         // 2. 空 body 防御
-        mockMvc.perform(post("/requirements")).andExpect(status().isBadRequest());
+        mockMvc.perform(post("/api/requirements")).andExpect(status().isBadRequest());
 
         // 3. 提交缺验收 → 422 + 缺失清单 + 信封 code=1000
-        MvcResult gate = mockMvc.perform(post("/requirements/{id}/submit", id))
+        MvcResult gate = mockMvc.perform(post("/api/requirements/{id}/submit", id))
                 .andExpect(status().is(422)).andReturn();
         JsonNode gateBody = json.readTree(utf8Body(gate));
         assertEquals(1000, gateBody.get("code").intValue());
@@ -81,29 +81,29 @@ class RequirementControllerTest {
 
         // 4. 全量表单保存（PUT）→ 补齐后提交 → SUBMITTED
         RequirementForm full = RequirementTestFixtures.fullForm();
-        mockMvc.perform(put("/requirements/{id}", id)
+        mockMvc.perform(put("/api/requirements/{id}", id)
                         .contentType("application/json").content(json.writeValueAsString(full)))
                 .andExpect(status().isOk());
-        mockMvc.perform(post("/requirements/{id}/submit", id))
+        mockMvc.perform(post("/api/requirements/{id}/submit", id))
                 .andExpect(status().isOk());
 
         // 5. 双目标渲染
-        MvcResult rendered = mockMvc.perform(post("/requirements/{id}/render", id)
+        MvcResult rendered = mockMvc.perform(post("/api/requirements/{id}/render", id)
                         .contentType("application/json").content("{\"target\":\"openspec\"}"))
                 .andExpect(status().isOk()).andReturn();
         assertEquals(1, json.readTree(utf8Body(rendered))
                 .get("data").get("version").intValue());
-        mockMvc.perform(post("/requirements/{id}/render", id)
+        mockMvc.perform(post("/api/requirements/{id}/render", id)
                         .contentType("application/json").content("{\"target\":\"vibecoding\"}"))
                 .andExpect(status().isOk());
 
         // 6. 无效 target → 400
-        mockMvc.perform(post("/requirements/{id}/render", id)
+        mockMvc.perform(post("/api/requirements/{id}/render", id)
                         .contentType("application/json").content("{\"target\":\"word\"}"))
                 .andExpect(status().isBadRequest());
 
         // 7. 读取工件内容（含模板基准）
-        MvcResult content = mockMvc.perform(get("/requirements/{id}/artifacts/{version}", id, 1)
+        MvcResult content = mockMvc.perform(get("/api/requirements/{id}/artifacts/{version}", id, 1)
                         .param("target", "vibecoding"))
                 .andExpect(status().isOk()).andReturn();
         assertTrue(json.readTree(utf8Body(content))
@@ -112,18 +112,18 @@ class RequirementControllerTest {
         // 8. 保存修订 → 导出 md（内容 = 修订版）
         Map<String, String> revised = new LinkedHashMap<String, String>();
         revised.put("TASK.md", "# 任务：修订版\n");
-        mockMvc.perform(put("/requirements/{id}/artifacts/{version}", id, 1)
+        mockMvc.perform(put("/api/requirements/{id}/artifacts/{version}", id, 1)
                         .contentType("application/json")
                         .content("{\"target\":\"vibecoding\",\"files\":{\"TASK.md\":\"# 任务：修订版\\n\"}}"))
                 .andExpect(status().isOk());
-        MvcResult exported = mockMvc.perform(get("/requirements/{id}/export", id)
+        MvcResult exported = mockMvc.perform(get("/api/requirements/{id}/export", id)
                         .param("target", "vibecoding"))
                 .andExpect(status().isOk()).andReturn();
         assertEquals("# 任务：修订版\n", exported.getResponse().getContentAsString());
         assertEquals("false", exported.getResponse().getHeader("X-Artifact-Stale"));
 
         // 9. 列表过滤
-        MvcResult list = mockMvc.perform(get("/requirements")
+        MvcResult list = mockMvc.perform(get("/api/requirements")
                         .param("status", "EXPORTED").param("q", "订单"))
                 .andExpect(status().isOk()).andReturn();
         assertEquals(1, json.readTree(utf8Body(list))
@@ -133,16 +133,16 @@ class RequirementControllerTest {
     @Test
     void 导出openspec为zip_含附件() throws Exception {
         String id = create(RequirementTestFixtures.fullForm());
-        mockMvc.perform(post("/requirements/{id}/submit", id)).andExpect(status().isOk());
-        mockMvc.perform(multipart("/requirements/{id}/attachments", id)
+        mockMvc.perform(post("/api/requirements/{id}/submit", id)).andExpect(status().isOk());
+        mockMvc.perform(multipart("/api/requirements/{id}/attachments", id)
                         .file(new MockMultipartFile("file", "shot.png", "image/png",
                                 new byte[]{(byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A})))
                 .andExpect(status().isOk());
-        mockMvc.perform(post("/requirements/{id}/render", id)
+        mockMvc.perform(post("/api/requirements/{id}/render", id)
                         .contentType("application/json").content("{\"target\":\"openspec\"}"))
                 .andExpect(status().isOk());
 
-        MvcResult zip = mockMvc.perform(get("/requirements/{id}/export", id)
+        MvcResult zip = mockMvc.perform(get("/api/requirements/{id}/export", id)
                         .param("target", "openspec"))
                 .andExpect(status().isOk()).andReturn();
         assertEquals("application/zip", zip.getResponse().getContentType());
@@ -155,10 +155,10 @@ class RequirementControllerTest {
     @Test
     void 附件非法格式400_魔数不符400() throws Exception {
         String id = create(RequirementTestFixtures.fullForm());
-        mockMvc.perform(multipart("/requirements/{id}/attachments", id)
+        mockMvc.perform(multipart("/api/requirements/{id}/attachments", id)
                         .file(new MockMultipartFile("file", "tool.exe", "application/x-exe", new byte[]{1})))
                 .andExpect(status().isBadRequest());
-        mockMvc.perform(multipart("/requirements/{id}/attachments", id)
+        mockMvc.perform(multipart("/api/requirements/{id}/attachments", id)
                         .file(new MockMultipartFile("file", "fake.png", "image/png", "MZfake".getBytes())))
                 .andExpect(status().isBadRequest());
     }
@@ -166,18 +166,18 @@ class RequirementControllerTest {
     @Test
     void 编辑后导出带过期警示头() throws Exception {
         String id = create(RequirementTestFixtures.fullForm());
-        mockMvc.perform(post("/requirements/{id}/submit", id)).andExpect(status().isOk());
-        mockMvc.perform(post("/requirements/{id}/render", id)
+        mockMvc.perform(post("/api/requirements/{id}/submit", id)).andExpect(status().isOk());
+        mockMvc.perform(post("/api/requirements/{id}/render", id)
                         .contentType("application/json").content("{\"target\":\"vibecoding\"}"))
                 .andExpect(status().isOk());
         // 编辑（回退 DRAFT + 工件过期）→ 再提交 → 直接导出旧工件（未重渲染）
         RequirementForm edited = RequirementTestFixtures.fullForm();
         edited.getBasic().setTitle("订单导出（改）");
-        mockMvc.perform(put("/requirements/{id}", id)
+        mockMvc.perform(put("/api/requirements/{id}", id)
                         .contentType("application/json").content(json.writeValueAsString(edited)))
                 .andExpect(status().isOk());
-        mockMvc.perform(post("/requirements/{id}/submit", id)).andExpect(status().isOk());
-        MvcResult exported = mockMvc.perform(get("/requirements/{id}/export", id)
+        mockMvc.perform(post("/api/requirements/{id}/submit", id)).andExpect(status().isOk());
+        MvcResult exported = mockMvc.perform(get("/api/requirements/{id}/export", id)
                         .param("target", "vibecoding"))
                 .andExpect(status().isOk()).andReturn();
         assertEquals("true", exported.getResponse().getHeader("X-Artifact-Stale"), "过期警示头必须为 true");
@@ -191,7 +191,7 @@ class RequirementControllerTest {
     }
 
     private String create(RequirementForm form) throws Exception {
-        MvcResult result = mockMvc.perform(post("/requirements")
+        MvcResult result = mockMvc.perform(post("/api/requirements")
                         .contentType("application/json").content(json.writeValueAsString(form)))
                 .andExpect(status().isOk()).andReturn();
         return json.readTree(utf8Body(result)).get("data").get("id").asText();

@@ -24,8 +24,9 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
  * Ant 风格 pattern 按具体度排序：/assets/** 与 /index.html 比 /** 具体，
  * 先命中——所以带哈希资产拿长缓存、入口页拿 noCache、其余路径落进
  * /** 的 {@link SpaFallbackResolver} 做 SPA 回退。而 @RequestMapping 控制器
- * 的优先级高于一切资源 handler，API 流量根本不会走到这里（/api/** 由
- * {@code ApiPrefixRewriteFilter} 剥前缀后交给控制器）。
+ * 的优先级高于一切资源 handler，API 流量根本不会走到这里（控制器映射
+ * 直接带 /api 前缀，如 /api/documents——这正是合体后前端路由与 API
+ * 同端口不冲突的根基：两者命名空间天然分离）。
  */
 @Configuration
 public class WebStaticConfig implements WebMvcConfigurer {
