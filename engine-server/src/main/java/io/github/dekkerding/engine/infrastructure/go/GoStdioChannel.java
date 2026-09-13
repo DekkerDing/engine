@@ -4,6 +4,7 @@ import io.github.dekkerding.engine.domain.exception.EngineException;
 import io.github.dekkerding.engine.infrastructure.go.protocol.GoProtocol;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
@@ -69,6 +70,7 @@ public class GoStdioChannel implements GoChannel {
     private final AtomicLong requestId = new AtomicLong();
 
     /** 生产构造：Spring 装配（launcher 拉起真实 Go 子进程）。 */
+    @Autowired
     public GoStdioChannel(GoProcessLauncher launcher,
                           @Value("${engine.go.stdio-timeout-seconds:60}") long timeoutSeconds) {
         this(launcher::launch, timeoutSeconds);
