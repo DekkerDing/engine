@@ -12,7 +12,6 @@ import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -283,9 +282,28 @@ public class InMemoryVectorIndex {
                 + "请删除相关资源后用当前模型重新摄取（或切换回原模型）");
     }
 
-    /** 按分数降序取前 K。全排序 O(n log n)：学习规模足够；百万级再换 bounded heap / ANN */
+    /**
+     * 按分数降序取前 K（量化定序）。全排序 O(n log n)：学习规模足够；百万级再换 bounded heap / ANN。
+     *
+     * <p>【定序合同 · 与 Go 端 sortHits 逐字对齐（gotoolbox 4.5 对拍前提）】
+     * 平分判定用分数量化（{@code Math.round(score * 1e6)} 整数格点）而非容差比较——
+     * {@code |a-b|<=ε} 不满足传递性，喂给排序是未定义行为；量化后是严格全序。
+     * 量化分数降序 → 平分按 documentId 字典序 → 再按 chunkIndex 升序。
+     * 无平分的常规场景与"纯分数降序"行为一致（分数主导位不变）。
+     */
     private List<VectorHit> topK(List<VectorHit> hits, int topK) {
-        hits.sort(Comparator.comparingDouble(VectorHit::getScore).reversed());
+        hits.sort((a, b) -> {
+            long qa = Math.round(a.getScore() * 1_000_000L);
+            long qb = Math.round(b.getScore() * 1_000_000L);
+            if (qa != qb) {
+                return Long.compare(qb, qa); // 量化分数降序（浮点尾差被格点吸收）
+            }
+            int byDoc = a.getEntry().getDocumentId().compareTo(b.getEntry().getDocumentId());
+            if (byDoc != 0) {
+                return byDoc; // 平分第一 tiebreak：文档字典序
+            }
+            return Integer.compare(a.getEntry().getChunkIndex(), b.getEntry().getChunkIndex()); // 块序号
+        });
         return new ArrayList<>(hits.subList(0, Math.min(topK, hits.size())));
     }
 
