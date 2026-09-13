@@ -14,7 +14,7 @@
 - [x] 2.2 Go 通道接口与 stdio 实现（常驻读线程 + `BlockingQueue` + 毒丸 + 串行化 + 超时）——初版落 `infrastructure/golang/`，随 D10 并入 `infrastructure/go/GoStdioChannel`（API 取手写版 `send(Map)→Response`，内核取已测硬化：`poll(timeout)` 免忙等/`EngineException`/迟到帧丢弃）；验证：FakeGoToolbox 假进程集成测试 5 项全过（握手往返/超时+迟到帧自愈/未知方法通道存活/优雅关闭后未运行/启动前快败）；0.5b 合并迁移后全量 154 项重跑全绿（迟到帧时序裕度修正 2s→1.2s，抗全量并发抖动）
 - [x] 2.3 `GoToolboxProvider` 门面补齐与 `GoProtocol` 对齐：`sys.stats`、`hashing.generate` 参数（text/dim/normalize）、错误帧转 `EngineException.downstream`；验证：假通道单测 10 项全过（tokenize/keywords/chunk/vectorSearch 参数传递与 DTO 解析、generateHash normalize 三参、stats、embedBatch 512 维降级组装、错误帧转 503 EngineException、空 result 容错、insert/delete 计数）（实测：GoToolboxProviderTest tests=10 failures=0；错误翻译落在通道层 call()，假通道按同款语义回放验证）
 - [x] 2.4 两级装配门控：`engine.go.enabled`（默认 false）控通道三件套，`go-toolbox` Profile + enabled 控降级 provider；`application.yml` 加 `engine.go.*` 配置块（enabled/binary/command/stdio-timeout-seconds）；验证：`ApplicationContextRunner` 四态单测全过（默认配置零 Go Bean——启动炸弹已拆除的直接证据；enabled+Profile 通道拉起 go run 真实握手 sys.ping 成功且降级 provider 在场；enabled 无 Profile 仅通道不接管；Profile 无 enabled provider 不装配）（实测：GoAssemblyGatingTest tests=4 failures=0；"TEXT 无重复注册"的全应用闭环归 3.4；修双构造器歧义——生产 ctor 补 @Autowired）
-- [ ] 2.5 毒丸与崩溃语义：杀死 Go 子进程后在途/后续调用快速失败、`@PreDestroy` 发 sys.shutdown；验证：集成测试杀进程后断言调用抛「引擎已退出」语义错误且不阻塞
+- [x] 2.5 毒丸与崩溃语义：杀死 Go 子进程后在途/后续调用快速失败、`@PreDestroy` 发 sys.shutdown；验证：StdioGoChannelCrashTest 3 项全过（外杀后首次/后续调用均抛「退出/写入失败」语义 EngineException 且实测秒级返回——30s 长超时配置下不靠超时兜底；die.now 自杀分支同款快败；崩溃态 close() 静默成功）（实测：tests=3 failures=0）
 
 ## 3. 场景一：text.* 与 hashing.*（Go 注册 + Java 对拍）
 
