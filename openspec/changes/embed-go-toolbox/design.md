@@ -110,5 +110,7 @@ Go 文件头统一结构：包职责一句话 →【教学注释】Go 概念块�
 
 ## Open Questions
 
-- `goToolbox` 健康段除 `status` 外的具体指标字段（如 uptime/已处理请求数/索引行数）——实现时按易得性取用，不改变 spec 契约
-- Go 版本下限是否钉 1.21（泛型与 `slices` 包教学价值）还是放宽 1.18——首个任务落地时按节点实际版本定
+两项均已随实施落定（8.4 回写）：
+
+- ~~`goToolbox` 健康段除 `status` 外的具体指标字段~~ → **已落定：`version` / `vectorCount` / `tools`（DOWN 态另带 `lastError`）**——全部来自 `sys.stats` 单次真实往返（微秒级纯内存读，无新增 Go 侧状态），兑现"按易得性取用"；uptime/请求计数未取（须引擎新增计数器，违背易得性原则）。值对象 `domain/model/engine/GoToolboxStatus.java`，探活实现 `GoStdioChannel.status()`（6.1）
+- ~~Go 版本下限是否钉 1.21 还是放宽 1.18~~ → **已落定：钉 1.21**（`golang/go.mod` 的 `go 1.21` 指令）；节点实际 go1.27.1（1.1 实测）满足。放宽 1.18 否决——`slices` 等标准库增强 1.21 起齐备，教学价值成立且下限不构成部署负担（本机/CI 均高于下限）
