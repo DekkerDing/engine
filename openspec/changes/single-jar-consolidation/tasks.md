@@ -61,9 +61,12 @@
 - [ ] 6.2 新增 `docs/reqforge-single-jar-spec.md`（规约文档：路由/缓存/健康判定表/自测清单），验证文档创建后 commit（锚点 6.2）
 - [ ] 6.3 改写 `docs/deployment.md`（单进程单端口部署、新 HEALTHCHECK、回滚），验证无 8081/双进程残留描述后 commit（锚点 6.3）
 - [ ] 6.4 改写 `docs/architecture.md`（进程拓扑：三进程两跳 → 单 JAR 单进程），验证拓扑图与文字一致后 commit（锚点 6.4）
-- [ ] 6.5 改写 `docs/reqforge-dev-guide.md`（本地开发：Vite 代理不变、构建链新位置）与 `docs/reqforge-user-guide.md`（用户视角端口与访问），验证后 commit（锚点 6.5）
-- [ ] 6.6 改写 `docs/learning-path.md` 与 `docs/frontend-standards.md` 中涉及网关/双端口的段落，验证后 commit（锚点 6.6）
-- [ ] 6.7 `docs/reqforge-gateway-go-*.md` 头部标记「历史文档（已被单 JAR 合体取代）」，验证后 commit（锚点 6.7）
+- [x] 6.5 改写 `docs/reqforge-dev-guide.md`（本地开发：Vite 代理不变、构建链新位置）与 `docs/reqforge-user-guide.md`（用户视角端口与访问），验证后 commit（锚点 6.5）
+  - 实测：dev-guide v1.3（拓扑/三件套对照/12 处链接/启动打包/一键脚本/FAQ/速查）与 user-guide v1.2（概述/构建/部署/start.bat/排查）全量改写；两篇 grep 无 engine-gateway/:8081/go build 功能性残留
+- [x] 6.6 改写 `docs/learning-path.md` 与 `docs/frontend-standards.md` 中涉及网关/双端口的段落，验证后 commit（锚点 6.6）
+  - 实测：learning-path（全链路第 2 步、上手命令、3 处路径）与 frontend-standards（适用范围、目录树、SPA 回退指称、健康卡片说明）改写；两篇 grep CLEAN
+- [x] 6.7 `docs/reqforge-gateway-go-*.md` 头部标记「历史文档（已被单 JAR 合体取代）」，验证后 commit（锚点 6.7）
+  - 实测：两篇头部注入历史标记块 + 指向现行 single-jar 文档链接；原状态行保留为「状态（历史）」
 
 ## [W4] 7. 终验 —— 依赖全部完成
 
