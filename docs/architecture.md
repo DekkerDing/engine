@@ -13,8 +13,8 @@
 浏览器（React SPA）
   │  POST /api/search {"query": "红塔"}
   ▼
-engine-gateway (:8090)  ──────────────────────────────────────────
-  │  ProxyController：剥 /api 前缀 → OkHttp 转发 127.0.0.1:8081/search
+engine-gateway (:8090)  ← Go/net/http 实现
+  │  ProxyHandler：剥 /api 前缀 → ReverseProxy 转发 127.0.0.1:8081/search
   ▼
 engine-server (:8081)  ───────────────────────────────────────────
   │  interfaces: SearchController        参数校验（@Valid）
@@ -66,9 +66,21 @@ engine/（Gradle 多模块，一棵 IDEA 树看全所有源码）
 │       ├── server_py4j.py            #     Py4J 通道入口（主）
 │       ├── server_stdio.py           #     stdio 通道入口（备）
 │       └── core/{embeddings,registry,tokenizer}.py
-├── engine-gateway/                   # Spring Boot :8090 —— 聚合网关
+├── engine-gateway/                 # Go/net/http :8090 —— 聚合网关（v1.1 新实现）
+│   ├── main.go                        #   入口：路由注册 + HTTP Server
+│   ├── config.yaml                    #   网关配置（端口/上游/健康/静态）
+│   ├── internal/
+│   │   ├── config/config.go           #   YAML 配置加载
+│   │   ├── model/api_response.go      #   统一信封
+│   │   ├── handler/
+│   │   │   ├── proxy.go               #   反代（ReverseProxy + 流式透传 + 大小闸门）
+│   │   │   ├── static.go              #   静态资源 + SPA 回退
+│   │   │   └── health.go              #   健康聚合 + 周期探测
+│   │   └── middleware/cache.go        #   缓存头中间件
+│   └── static/                        #   前端 dist/ 产物
+├── engine-gateway/                   # 旧 Java 网关（参考，不再维护）
 │   ├── src/main/java/...             #   反代/静态资源/健康聚合
-│   └── frontend/                     #   React 前端源码（gateway 的资产，src 之外）
+│   └── frontend/                     #   React 前端源码
 │       └── src/{api,layouts,pages,components,hooks}
 ├── docker/                           # 部署资产（Dockerfile×2、entrypoint、模型预下载）
 ├── docs/                             # 工程文档（本文所在）
@@ -85,7 +97,7 @@ engine/（Gradle 多模块，一棵 IDEA 树看全所有源码）
 entrypoint.sh (PID 1)
 ├── java engine-server.jar
 │   └── python server_py4j.py    # 随 Java 启停（shutdown hook 优雅终止）
-└── java engine-gateway.jar
+└── engine-gateway               # Go static binary
 ```
 
 ---
@@ -141,16 +153,20 @@ FailoverChannel (@Profile("failover")，通道选择器：组合，非继承)
 
 ---
 
-## 4. engine-gateway 内部结构
+## 4. engine-gateway 内部结构（v1.1 Go 实现）
 
-| 包 | 职责 | 代表类 |
-|----|------|--------|
-| `proxy` | `/api/**` 剥前缀反代 8081，InputStream 流式透传（SSE-ready） | `ProxyController` `UpstreamProperties` |
-| `statics` | 静态资源、SPA 回退（非 /api 未命中 → index.html）、哈希资产长缓存 | `SpaFallbackResolver` `AssetCacheFilter` |
-| `health` | 周期探测 server（10s×3 次容错）聚合三组件健康 | `UpstreamHealthService` `HealthController` |
-| `config` | OkHttp 单例（连接 2s/读 60s） | `OkHttpConfig` |
+| 包/文件 | 职责 | 对照原 Java 类 |
+|---------|------|---------------|
+| `internal/handler/proxy.go` | `/api/**` 剥前缀反代 8081，httputil.ReverseProxy 流式透传（SSE-ready），55MB 上传闸门 | `ProxyController.java` |
+| `internal/handler/static.go` | 静态资源、SPA 回退（4 分支：`/` / 文件存在 / 目录 / 前端路由→index.html）、hash 资产长缓存 | `WebStaticConfig.java` + `SpaFallbackResolver.java` |
+| `internal/handler/health.go` | 周期探测 server（10s×3 次容错）聚合三组件健康，`sync.RWMutex` 保证线程安全 | `UpstreamHealthService.java` + `HealthController.java` |
+| `internal/middleware/cache.go` | `/assets/**` → `max-age=31536000,immutable`；`/index.html` → `no-cache` | `AssetCacheFilter.java` |
+| `internal/model/api_response.go` | 统一信封 `{code,message,data,timestamp}` | `ApiResponse.java` |
+| `internal/config/config.go` | YAML 配置加载（server/upstream/health/static/logging） | [application.yml](file:///F:/workspace/engine/engine-gateway/src/main/resources/application.yml) |
 
-网关是"哑管道"：不理解业务语义，multipart 解析关闭（body 原样透传给 server）。
+网关为"哑管道"：不理解业务语义，body 原样透传给 server（`Director` 不读 body）。multipart 解析关闭。
+与 Java 版网关的 **契约完全一致**：端口 8090、路由规则、信封格式、健康 JSON 结构均不变。
+详见 [Go 网关设计文档](file:///F:/workspace/engine/docs/reqforge-gateway-go-design.md) 和 [Go 网关规约文档](file:///F:/workspace/engine/docs/reqforge-gateway-go-spec.md)。
 
 ---
 

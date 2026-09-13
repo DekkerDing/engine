@@ -1,6 +1,6 @@
 # 前端代码规范（frontend-standards）
 
-> 适用范围：`engine-gateway/frontend/`（Vite5 + React18 + TypeScript + ReactRouter6 + AntD5）。
+> 适用范围：`frontend/`（Vite5 + React18 + TypeScript + ReactRouter6 + AntD5）。
 > 本文回答：**页面怎么定位**（栅格与坐标体系）、**尺寸用什么值**（间距/字号 token）、**代码怎么命名**（组件/文件/API 客户端）、**状态怎么展示**（徽标/横幅约定）。
 > 布局骨架是手写 CSS Grid——组件风格靠 AntD，布局原理靠手写讲透，这是本工程的教学定位。
 

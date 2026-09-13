@@ -22,11 +22,11 @@
 
 | 组件 | 端口 | 说明 |
 |------|------|------|
-| engine-gateway | **8090**（对外） | 流量唯一入口，前端产物内嵌 jar |
+| engine-gateway | **8090**（对外） | 流量唯一入口，Go 静态二进制 + 前端产物在 static/ 目录 |
 | engine-server | 8081（仅容器内） | 业务服务，Python 脚本内嵌 jar |
 | Python 引擎 | 25335（Py4J 环回） | server 的子进程，随其启停 |
 
-**运行时镜像不含 Node/npm**——前端已编译为静态产物内嵌 gateway jar，SPA 路由由网关回退承担。
+**运行时镜像不含 Node/npm 和 JDK**（gateway 用 Go 静态编译，无需 JVM）——前端已编译为静态产物由 Go 网关 serve。
 
 ---
 
@@ -42,8 +42,11 @@
 ### 2.2 本地构建轨（日常迭代）
 
 ```bash
-# 1. 构建两个 jar（gateway 任务链会自动 npm build 并内嵌前端产物）
-$ ./gradlew :engine-server:bootJar :engine-gateway:bootJar
+# 1. 构建 server jar + 前端 + Go 网关
+$ ./gradlew :engine-server:bootJar buildFrontend copyFrontendDist
+$ cd engine-gateway
+$ GOOS=linux GOARCH=amd64 go build -o engine-gateway .
+$ cd ..
 
 # 2. 构建镜像（在仓库根执行；构建上下文 = 仓库根，受 .dockerignore 约束）
 $ docker build -f docker/Dockerfile -t text-vector-engine:local .
@@ -127,9 +130,12 @@ $ scripts/env-check.bat   # Windows
 ### 3.2 构建
 
 ```bash
-$ ./gradlew :engine-server:bootJar :engine-gateway:bootJar
+$ ./gradlew :engine-server:bootJar buildFrontend copyFrontendDist
+$ cd engine-gateway
+$ go build -o engine-gateway.exe .   # Windows
+$ go build -o engine-gateway .       # Linux/macOS
 # 产物：engine-server/build/libs/engine-server.jar
-#       engine-gateway/build/libs/engine-gateway.jar（已内嵌前端）
+#       engine-gateway/engine-gateway(或 .exe)
 ```
 
 ### 3.3 启动顺序与停止
@@ -139,11 +145,12 @@ $ ./gradlew :engine-server:bootJar :engine-gateway:bootJar
 ```bash
 # 开发态（推荐）：两个终端分别
 $ ./gradlew :engine-server:bootRun
-$ ./gradlew :engine-gateway:bootRun
+$ cd engine-gateway && go run .
 
 # 生产态：两个终端分别（或用 systemd/supervisor 托管）
 $ java -jar engine-server/build/libs/engine-server.jar
-$ java -jar engine-gateway/build/libs/engine-gateway.jar
+$ cd engine-gateway && ./engine-gateway     # Linux
+$ cd engine-gateway && .\engine-gateway.exe # Windows
 ```
 
 **停止**：在对应终端 `Ctrl+C`（触发 JVM shutdown hook，**Python 子进程会被连带优雅终止**）。
@@ -163,7 +170,7 @@ IDE 用户用 Stop 按钮（等价发 SIGTERM，同样走 hook）。
 | 2 | 端口被占但 `netstat -ano \| findstr 8090` 查不到 | Windows 端口处于 **Bound**（非 LISTENING）状态，netstat 默认显示不全 | 用 PowerShell `Get-NetTCPConnection -LocalPort 8090` 查 PID 后 `taskkill /F /PID <pid>`；实在不行换端口（改 `application.yml` 的 `server.port`） |
 | 3 | 启动报 `Py4J 通道 ... 未就绪` | 25335 被占用 / Python 环境损坏 | `Get-NetTCPConnection -LocalPort 25335` 排查占用；`python -c "import torch"` 验证依赖 |
 | 4 | bootRun 日志中文乱码 | Windows 默认 GBK | 构建脚本已统一 UTF-8；若终端仍乱码，Git Bash 执行 `export LANG=zh_CN.UTF-8`，或 IDEA `Help→Edit Custom VM Options` 加 `-Dfile.encoding=UTF-8` |
-| 5 | 页面 404（API 正常） | gateway 启动早于前端首次构建，classpath 无 static 产物 | `./gradlew :engine-gateway:bootRun` 重新启动（bootRun 会重跑 processResources 链） |
+| 5 | 页面 404（API 正常） | Go 网关 static/ 目录缺少前端产物 | 重新构建：`./gradlew buildFrontend copyFrontendDist`，然后 `cd engine-gateway && go build .` |
 | 6 | 重启后发现两个 Python 进程 | Windows 强杀（`taskkill /F`）Java 不走 shutdown hook，Python 成孤儿 | `tasklist \| findstr python` 后逐个 `taskkill /F /PID`；正常停机请走 Ctrl+C |
 | 7 | 检索结果为空/语义不命中 | min-vector-score 阈值与当前模型分布不匹配（文本默认 0.40 按 bge 标定；图片默认 0.25 按 CLIP 标定，两模态独立配置） | 查看响应 `scores` 分布调整 `engine.search.min-vector-score` / `engine.search.image-min-vector-score`；切换模型（MiniLM）必须重新摄取 |
 | 8 | 切换模型键后检索报维度不匹配 | 库内向量 512 维（bge），当前查询 384 维（MiniLM） | 预期行为（维度闸门）：切回原模型，或清空文档库重新摄取 |
@@ -178,10 +185,10 @@ IDE 用户用 Stop 按钮（等价发 SIGTERM，同样走 hook）。
 
 | 部署规模 | 内存 | 说明 |
 |----------|------|------|
-| 最小可用 | 2GB | server 堆 768m + gateway 256m + Python（torch+文本模型 ~1.2GB）；CLIP 与重排器均惰性加载，不用图片检索/重排可不触发 |
+| 最小可用 | 2GB | server 堆 768m + gateway（Go 静态编译 ~20MB） + Python（torch+文本模型 ~1.2GB）；CLIP 与重排器均惰性加载，不用图片检索/重排可不触发 |
 | 舒适 | 6GB | 文本 + CLIP 双模型常驻（CLIP 首次图片请求加载 ~1GB），万级向量驻留仍有余量 |
 | 照片语义检索全开 | 8GB | 重排器 bge-reranker-base 首次重排请求再加载 ~1.1GB（惰性，与 CLIP 同纪律）；千级照片导入期间 CLIP+bge 连续编码，并发度默认 2（`engine.images.import.concurrency`） |
 
 **模型清单（photo-semantic-search 后）**：bge-small-zh-v1.5（~90MB，文本+描述路）+ MiniLM 多语备选（~470MB）+ chinese-clip-vit-base-patch16（~400MB，像素路）+ bge-reranker-base（~1.1GB，重排，惰性）——磁盘合计 ~2.1GB，`docker/download_models.py --dry-run` 可随时核对清单。重排可经 `engine.search.rerank.enabled=false` 或请求参数 `"rerank": false` 关闭（省内存/降延迟，精度换可用）。
 
-环境变量可调（容器）：`JAVA_OPTS_SERVER`、`JAVA_OPTS_GATEWAY`、`HEALTH_TIMEOUT_SECONDS`、`SHUTDOWN_GRACE_SECONDS`（见 `docker/entrypoint.sh`）。
+环境变量可调（容器）：`JAVA_OPTS_SERVER`、`HEALTH_TIMEOUT_SECONDS`、`SHUTDOWN_GRACE_SECONDS`（见 `docker/entrypoint.sh`；网关为 Go 二进制，无 JVM 参数）。

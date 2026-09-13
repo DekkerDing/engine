@@ -2,9 +2,9 @@
 # Dockerfile.full — 全构建轨（多阶段，从源码可复现构建）
 # ------------------------------------------------------------
 # 【与本地轨（docker/Dockerfile）的区别】
-#   本地轨 COPY 本机已构建的 jar（快，日常迭代）；
-#   全构建轨 stage1 在容器内完成 npm 前端构建 + gradle jar 构建（慢，
-#   但只需要 Docker 即可从任意干净源码复现出与本地轨行为一致的镜像）。
+#   本地轨 COPY 本机已构建的产物（快，日常迭代）；
+#   全构建轨 stage1 在容器内完成 npm 前端构建 + gradle jar 构建 + Go 网关编译
+#   （慢，但只需要 Docker 即可从任意干净源码复现出与本地轨行为一致的镜像）。
 #   两轨 stage2 运行时层保持一致（spec: 双构建轨镜像/两轨产出等价）。
 #
 # 【构建】（仓库根目录）：
@@ -12,7 +12,7 @@
 # 【运行】与本地轨完全相同（见 docker/Dockerfile 头部注释）。
 # ============================================================
 
-# ---------- stage 1：构建（JDK 8 + 项目自带 gradlew wrapper + Node 22） ----------
+# ---------- stage 1：构建（JDK 8 + gradlew wrapper + Node 22 + Go 工具链） ----------
 # 【为什么不用 gradle:8-jdk8 镜像】项目经 wrapper 钉住 Gradle 7.6.4（与本机
 # 开发完全同版本）；镜像自带的 Gradle 8 与 Spring Boot 2.6.14 插件不保证兼容。
 # 用 wrapper 构建还有个好处：容器内构建版本 = 开发机构建版本，可复现
@@ -25,10 +25,17 @@ FROM eclipse-temurin:8-jdk-jammy AS builder
 COPY --from=node:22 /usr/local/bin /usr/local/bin
 COPY --from=node:22 /usr/local/lib/node_modules /usr/local/lib/node_modules
 
+# Go 工具链同理：官方镜像的 /usr/local/go 是上游自包含发行包（静态链接，
+# 不依赖 libc），整目录拷到 glibc 的 jammy 里可直接用
+COPY --from=golang:1.23-alpine /usr/local/go /usr/local/go
+ENV PATH=$PATH:/usr/local/go/bin
+
 # 构建参数：容器内构建同样走国内加速（与本地开发一致的网络策略）
 ARG NPM_REGISTRY=https://registry.npmmirror.com
+ARG GOPROXY=https://goproxy.cn,direct
 # npm 读环境变量 npm_config_registry（对 gradle 任务链拉起的 npm install 生效）
 ENV npm_config_registry=${NPM_REGISTRY}
+ENV GOPROXY=${GOPROXY}
 
 WORKDIR /build
 # 源码整体进入构建上下文（配合仓库根 .dockerignore 排除 node_modules/.git/data 等）
@@ -38,11 +45,14 @@ COPY . .
 # Linux 内直接执行会报 "bad interpreter"。统一去 CR 后再执行
 RUN sed -i 's/\r$//' gradlew && chmod +x gradlew
 
-# 一次性构建两个 jar：gateway 的 bootJar 任务链自动完成
-# npmInstall → buildFrontend → copyFrontendDist（前端产物内嵌 jar）。
+# 一次性构建全部产物：
+#   1. server jar（gradle）
+#   2. 前端 dist → engine-gateway/static/（根任务链 npmInstall → buildFrontend → copyFrontendDist）
+#   3. Go 网关 linux 二进制（CGO_ENABLED=0 纯静态，运行层无需任何 Go 运行库）
 # --no-daemon：一次性容器构建不起常驻 daemon；-x test：跳过测试缩短发布构建
 # （需要带测试验证的发布可去掉 -x test）
-RUN ./gradlew :engine-server:bootJar :engine-gateway:bootJar --no-daemon -x test
+RUN ./gradlew :engine-server:bootJar buildFrontend copyFrontendDist --no-daemon -x test \
+    && cd engine-gateway && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o engine-gateway .
 
 # ---------- stage 2：运行时（与本地轨 docker/Dockerfile 等价） ----------
 # 【同步维护提醒】此段与 docker/Dockerfile 的运行时层保持一致：
@@ -73,9 +83,12 @@ ENV SENTENCE_TRANSFORMERS_HOME=/app/models
 COPY docker/entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
-# 与本地轨唯一的差别：jar 来自 stage1 的容器内构建，而非本机 COPY
+# 与本地轨唯一的差别：产物来自 stage1 的容器内构建，而非本机 COPY
 COPY --from=builder /build/engine-server/build/libs/engine-server.jar /app/engine-server.jar
-COPY --from=builder /build/engine-gateway/build/libs/engine-gateway.jar /app/engine-gateway.jar
+COPY --from=builder /build/engine-gateway/engine-gateway /app/engine-gateway
+COPY --from=builder /build/engine-gateway/config.yaml /app/config.yaml
+COPY --from=builder /build/engine-gateway/static/ /app/static/
+RUN chmod +x /app/engine-gateway
 
 EXPOSE 8090
 VOLUME /app/data

@@ -1,6 +1,6 @@
 # reqforge — 开发手册
 
-> 面向：后端开发、前端开发、Flutter 开发 | 版本：1.0 | 日期：2026-09-13
+> 面向：后端开发、前端开发、Flutter 开发 | 版本：1.1 | 日期：2026-09-13
 
 ---
 
@@ -9,7 +9,7 @@
 1. [架构总览](#1-架构总览)
 2. [项目结构与模块职责](#2-项目结构与模块职责)
 3. [后端开发指南 (engine-server)](#3-后端开发指南-engine-server)
-4. [前端开发指南 (engine-gateway/frontend)](#4-前端开发指南-engine-gatewayfrontend)
+4. [前端开发指南 (frontend)](#4-前端开发指南-frontend)
 5. [APP 开发指南 (reqforge_app)](#5-app-开发指南-reqforge_app)
 6. [API 接口文档](#6-api-接口文档)
 7. [启动与运行](#7-启动与运行)
@@ -28,7 +28,7 @@
      │                                     │
      │ HTTP 请求                            │ HTTP 请求
      ▼                                     ▼
-engine-gateway (:8090) ◀────────────────────┘
+engine-gateway (:8090)  ← Go/net/http 实现
   ├─ 静态资源托管（React dist/）
   ├─ /api/** → 剥前缀反代 engine-server (:8081)
   └─ SPA 回退（非 /api 未命中 → index.html）
@@ -48,9 +48,13 @@ engine-server (:8081)
 | 模块 | 技术栈 | 端口 | 职责 |
 |------|--------|------|------|
 | engine-server | Java 8 + Spring Boot + SQLite + Lucene + Py4J | 8081 | 需求 CRUD、渲染规约、工件管理、导出 |
-| engine-gateway | Java 8 + Spring Boot + OkHttp | 8090 | 静态资源 + API 反代 + 健康聚合 |
-| engine-gateway/frontend | React 18 + TypeScript + Ant Design 5 + Vite 5 | — | Web 前端 UI |
+| engine-gateway | Go 1.22 + net/http（标准库） | 8090 | 静态资源 + API 反代 + 健康聚合 |
+| frontend | React 18 + TypeScript + Ant Design 5 + Vite 5 | — | Web 前端 UI |
 | reqforge_app | Flutter 3.x + Dart | — | Android/iOS APP |
+
+> **v1.1 变更**：`engine-gateway` 已由 Java/Spring Boot 替换为 Go/net/http 实现。
+> **v1.2 变更**：旧 Java gateway 源码已移除（保留在 git 历史），`engine-gateway/` 目录
+> 即为 Go 工程；前端源码迁至仓库根 `frontend/`。对外端口、路由、契约完全不变。
 
 ### 1.3 DDD 分层依赖方向
 
@@ -170,25 +174,42 @@ engine-server/src/main/java/io/github/dekkerding/engine/
 ### 2.2 engine-gateway 网关源码结构
 
 ```
-engine-gateway/src/main/java/io/github/dekkerding/engine/
-├── GatewayApplication.java                   # Spring Boot 入口
-├── proxy/
-│   ├── ProxyController.java                  # /api/** 反代 8081
-│   └── UpstreamProperties.java               # 上游配置
-├── statics/
-│   ├── SpaFallbackResolver.java              # SPA 回退（非 /api → index.html）
-│   └── AssetCacheFilter.java                 # 哈希资产长缓存
-├── health/
-│   ├── UpstreamHealthService.java            # 周期探测 server 健康
-│   └── HealthController.java                 # 聚合健康端点
-└── config/
-    └── OkHttpConfig.java                     # OkHttp 单例配置
+engine-gateway/
+├── main.go                                   # 入口：路由注册 + HTTP Server 启动
+├── go.mod                                    # Go Module 定义
+├── go.sum                                    # 依赖锁定
+├── config.yaml                               # 网关配置（端口/上游/健康/静态资源）
+├── internal/
+│   ├── config/
+│   │   └── config.go                         # YAML 配置加载（默认值 + 文件覆盖）
+│   ├── model/
+│   │   └── api_response.go                   # 统一信封 {code,message,data,timestamp}
+│   ├── handler/
+│   │   ├── proxy.go                          # /api/** 反向代理（ReverseProxy + 流式透传 + 大小闸门）
+│   │   ├── static.go                         # 静态资源 + SPA 回退（4 分支逻辑）
+│   │   └── health.go                         # /api/system/health 聚合健康 + 周期探测 goroutine
+│   └── middleware/
+│       └── cache.go                          # /assets/** 长缓存头 + no-cache 头
+└── static/                                   # 前端 dist/ 产物（Gradle 构建时复制进来）
+    ├── index.html
+    └── assets/
 ```
 
-### 2.3 engine-gateway/frontend 前端源码结构
+**与原 Java 网关的对照关系**（Java 实现已随 Go 替换移除，源码见 git 历史；[设计文档](file:///F:/workspace/engine/docs/reqforge-gateway-go-design.md)）：
+
+| Java 类 | Go 文件 | 职责 |
+|---------|---------|------|
+| `ProxyController.java` | [handler/proxy.go](file:///F:/workspace/engine/engine-gateway/internal/handler/proxy.go) | API 反代 |
+| `WebStaticConfig.java` + `SpaFallbackResolver.java` | [handler/static.go](file:///F:/workspace/engine/engine-gateway/internal/handler/static.go) | 静态资源 + SPA 回退 |
+| `AssetCacheFilter.java` | [middleware/cache.go](file:///F:/workspace/engine/engine-gateway/internal/middleware/cache.go) | 缓存头 |
+| `HealthController.java` + `UpstreamHealthService.java` | [handler/health.go](file:///F:/workspace/engine/engine-gateway/internal/handler/health.go) | 健康聚合 |
+| `ApiResponse.java` | [model/api_response.go](file:///F:/workspace/engine/engine-gateway/internal/model/api_response.go) | 信封 |
+| [application.yml](file:///F:/workspace/engine/engine-gateway/src/main/resources/application.yml) | [config.yaml](file:///F:/workspace/engine/engine-gateway/config.yaml) | 配置 |
+
+### 2.3 frontend 前端源码结构
 
 ```
-engine-gateway/frontend/src/
+frontend/src/
 ├── main.tsx                                  # Vite 入口
 ├── App.tsx                                   # 路由定义
 ├── vite-env.d.ts                             # Vite 类型声明
@@ -381,8 +402,8 @@ void registerRenderers() {
 2. [RequirementDto.java](file:///F:/workspace/engine/engine-server/src/main/java/io/github/dekkerding/engine/interfaces/rest/dto/RequirementDto.java) — 同步加字段
 3. [RequirementJson.java](file:///F:/workspace/engine/engine-server/src/main/java/io/github/dekkerding/engine/infrastructure/persistence/RequirementJson.java) — 确保 JSON 序列化/反序列化覆盖新字段（使用 Jackson，字段自动映射）
 4. [DatabaseMigrator.java](file:///F:/workspace/engine/engine-server/src/main/java/io/github/dekkerding/engine/infrastructure/persistence/DatabaseMigrator.java) — 如果存的是 JSON 列则无需改表（Schema-less）
-5. 前端 [formFragments.tsx](file:///F:/workspace/engine/engine-gateway/frontend/src/pages/requirements/formFragments.tsx) — 加表单输入项
-6. 前端 [types.ts](file:///F:/workspace/engine/engine-gateway/frontend/src/api/types.ts) — 同步 TS 类型
+5. 前端 [formFragments.tsx](file:///F:/workspace/engine/frontend/src/pages/requirements/formFragments.tsx) — 加表单输入项
+6. 前端 [types.ts](file:///F:/workspace/engine/frontend/src/api/types.ts) — 同步 TS 类型
 7. APP 端 models 和 pages 同步
 
 ### 3.6 后端开发规范速查
@@ -398,22 +419,22 @@ void registerRenderers() {
 
 ---
 
-## 4. 前端开发指南 (engine-gateway/frontend)
+## 4. 前端开发指南 (frontend)
 
 ### 4.1 核心文件职责
 
 | 文件 | 职责 | 修改时机 |
 |------|------|----------|
-| [api/requirements.ts](file:///F:/workspace/engine/engine-gateway/frontend/src/api/requirements.ts) | 需求 API 调用方法 | 新增后端接口时 |
-| [api/types.ts](file:///F:/workspace/engine/engine-gateway/frontend/src/api/types.ts) | TypeScript 类型定义 | 后端 DTO 变更时 |
-| [api/client.ts](file:///F:/workspace/engine/engine-gateway/frontend/src/api/client.ts) | axios 实例、拦截器 | 改全局请求行为时 |
-| [App.tsx](file:///F:/workspace/engine/engine-gateway/frontend/src/App.tsx) | 路由定义 | 新增页面时 |
-| [layouts/AppLayout.tsx](file:///F:/workspace/engine/engine-gateway/frontend/src/layouts/AppLayout.tsx) | 全局布局 | 改导航菜单时 |
-| [pages/requirements/RequirementListPage.tsx](file:///F:/workspace/engine/engine-gateway/frontend/src/pages/requirements/RequirementListPage.tsx) | 需求列表 | 改列表功能时 |
-| [pages/requirements/RequirementFormPage.tsx](file:///F:/workspace/engine/engine-gateway/frontend/src/pages/requirements/RequirementFormPage.tsx) | 三步表单 | 改表单步骤时 |
-| [pages/requirements/RequirementWorkshopPage.tsx](file:///F:/workspace/engine/engine-gateway/frontend/src/pages/requirements/RequirementWorkshopPage.tsx) | 需求工坊 | 改工坊功能时 |
-| [pages/requirements/RequirementExportPage.tsx](file:///F:/workspace/engine/engine-gateway/frontend/src/pages/requirements/RequirementExportPage.tsx) | 导出页 | 改导出功能时 |
-| [pages/requirements/formFragments.tsx](file:///F:/workspace/engine/engine-gateway/frontend/src/pages/requirements/formFragments.tsx) | 表单子组件 | 改表单字段时 |
+| [api/requirements.ts](file:///F:/workspace/engine/frontend/src/api/requirements.ts) | 需求 API 调用方法 | 新增后端接口时 |
+| [api/types.ts](file:///F:/workspace/engine/frontend/src/api/types.ts) | TypeScript 类型定义 | 后端 DTO 变更时 |
+| [api/client.ts](file:///F:/workspace/engine/frontend/src/api/client.ts) | axios 实例、拦截器 | 改全局请求行为时 |
+| [App.tsx](file:///F:/workspace/engine/frontend/src/App.tsx) | 路由定义 | 新增页面时 |
+| [layouts/AppLayout.tsx](file:///F:/workspace/engine/frontend/src/layouts/AppLayout.tsx) | 全局布局 | 改导航菜单时 |
+| [pages/requirements/RequirementListPage.tsx](file:///F:/workspace/engine/frontend/src/pages/requirements/RequirementListPage.tsx) | 需求列表 | 改列表功能时 |
+| [pages/requirements/RequirementFormPage.tsx](file:///F:/workspace/engine/frontend/src/pages/requirements/RequirementFormPage.tsx) | 三步表单 | 改表单步骤时 |
+| [pages/requirements/RequirementWorkshopPage.tsx](file:///F:/workspace/engine/frontend/src/pages/requirements/RequirementWorkshopPage.tsx) | 需求工坊 | 改工坊功能时 |
+| [pages/requirements/RequirementExportPage.tsx](file:///F:/workspace/engine/frontend/src/pages/requirements/RequirementExportPage.tsx) | 导出页 | 改导出功能时 |
+| [pages/requirements/formFragments.tsx](file:///F:/workspace/engine/frontend/src/pages/requirements/formFragments.tsx) | 表单子组件 | 改表单字段时 |
 
 ### 4.2 新增前端页面标准流程
 
@@ -833,23 +854,48 @@ java -jar engine-server\build\libs\engine-server.jar
 
 ### 7.3 engine-gateway 启动
 
-**开发模式**：
+**直接运行（无需 Java/Gradle）**：
 
 ```powershell
-.\gradlew :engine-gateway:bootRun
+# 1. 确保前端产物已复制到 static/ 目录
+.\gradlew copyFrontendDist
+
+# 2. 编译并启动 Go 网关
+cd engine-gateway
+go build -o engine-gateway.exe .
+.\engine-gateway.exe
 ```
 
-注意：首次启动需确保前端已构建（bootRun 会自动执行 `processResources` 打包前端静态文件）。
+**或一步启动（开发模式）**：
+
+```powershell
+cd engine-gateway
+go run .
+```
+
+**指定配置文件**：
+
+```powershell
+.\engine-gateway.exe -config custom.yaml
+```
+
+启动日志关键行：
+```
+engine-gateway starting on :8090
+upstream: http://127.0.0.1:8081
+static dir: ./static
+```
 
 **前端热更新开发模式**（推荐前端开发使用）：
 
 ```powershell
-# 终端 1：启动 gateway（提供 API 代理 + 端口）
-.\gradlew :engine-gateway:bootRun
+# 终端 1：启动 Go 网关（提供 API 代理 + 端口）
+cd engine-gateway
+go run .
 
 # 终端 2：启动 Vite dev server（热更新）
 cd engine-gateway\frontend
-npm install     # 首次需安装依赖
+npm install
 npm run dev     # 浏览器打开 http://localhost:5173
                 # /api 请求自动代理到 http://127.0.0.1:8090
 ```
@@ -899,11 +945,18 @@ curl http://127.0.0.1:8090/api/system/health
 .\gradlew :engine-server:bootJar
 # 产物：engine-server/build/libs/engine-server.jar
 
-# 打包 gateway（含前端静态文件）
-.\gradlew :engine-gateway:buildFrontend    # 构建前端
-.\gradlew :engine-gateway:copyFrontendDist # 复制到 resources/static
-.\gradlew :engine-gateway:bootJar          # 打包
-# 产物：engine-gateway/build/libs/engine-gateway.jar
+# 构建前端 + 复制到 Go 网关 static/ 目录
+.\gradlew buildFrontend
+.\gradlew copyFrontendDist
+
+# 编译 Go 网关
+cd engine-gateway
+go build -o engine-gateway.exe .
+# 产物：engine-gateway/engine-gateway.exe
+
+# 跨平台编译（线上为 Linux 时）
+$env:GOOS="linux"; $env:GOARCH="amd64"; go build -o engine-gateway .
+# 产物：engine-gateway/engine-gateway (ELF binary)
 ```
 
 ### 8.2 前端单独构建
@@ -944,13 +997,15 @@ Write-Host "=== 1/4 构建 engine-server ==="
 if ($LASTEXITCODE -ne 0) { throw "server 构建失败" }
 
 Write-Host "=== 2/4 构建前端 ==="
-.\gradlew :engine-gateway:buildFrontend
+.\gradlew buildFrontend
 if ($LASTEXITCODE -ne 0) { throw "前端构建失败" }
 
 Write-Host "=== 3/4 构建 engine-gateway ==="
-.\gradlew :engine-gateway:copyFrontendDist
-.\gradlew :engine-gateway:bootJar
-if ($LASTEXITCODE -ne 0) { throw "gateway 构建失败" }
+.\gradlew copyFrontendDist
+cd engine-gateway
+go build -o engine-gateway.exe .
+if ($LASTEXITCODE -ne 0) { throw "Gateway 构建失败" }
+cd ..
 
 Write-Host "=== 4/4 构建 Flutter APP ==="
 cd F:\workspace\reqforge_app
@@ -959,7 +1014,7 @@ if ($LASTEXITCODE -ne 0) { throw "APP 构建失败" }
 
 Write-Host "=== 全部构建完成 ==="
 Write-Host "后端: engine-server/build/libs/engine-server.jar"
-Write-Host "网关: engine-gateway/build/libs/engine-gateway.jar"
+Write-Host "网关: engine-gateway/engine-gateway.exe"
 Write-Host "APP:  build/app/outputs/flutter-apk/app-debug.apk"
 ```
 
@@ -1005,7 +1060,7 @@ Write-Host "APP:  build/app/outputs/flutter-apk/app-debug.apk"
 7. 全量构建验证：
    .\gradlew :engine-server:bootJar
    cd frontend && npm run build
-   .\gradlew :engine-gateway:bootJar
+   cd engine-gateway && go build -o engine-gateway.exe .
    flutter build apk --debug
       ↓
 8. 提交代码 + 运行全量测试
@@ -1113,14 +1168,15 @@ A: `flutter clean` → `flutter pub get` → 重新构建。确保 Android SDK �
 .\gradlew :engine-server:test             # 运行全部测试
 .\gradlew :engine-server:test --tests "*RequirementControllerTest"  # 单个测试
 
-# ===== 网关 =====
-.\gradlew :engine-gateway:bootRun         # 启动 gateway
-.\gradlew :engine-gateway:buildFrontend   # 构建前端
-.\gradlew :engine-gateway:copyFrontendDist  # 复制前端到 resources
-.\gradlew :engine-gateway:bootJar         # 打包 gateway（含前端）
+# ===== 网关（Go 工程，gradle 只编排前端构建） =====
+.\gradlew buildFrontend       # 构建前端
+.\gradlew copyFrontendDist    # 复制前端产物到 engine-gateway/static/
+cd engine-gateway
+go run .                          # 启动 gateway（开发）
+go build -o engine-gateway.exe .  # 编译 gateway 二进制
 
 # ===== 前端 =====
-cd engine-gateway\frontend
+cd frontend
 npm install                               # 安装依赖
 npm run dev                               # 启动 Vite 热更新
 npm run build                             # 生产构建

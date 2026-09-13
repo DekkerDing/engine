@@ -24,8 +24,7 @@ const STATUS_OPTIONS: { value: RequirementStatus | ''; label: string }[] = [
   { value: '', label: '全部状态' },
   { value: 'DRAFT', label: '草稿' },
   { value: 'SUBMITTED', label: '已提交' },
-  { value: 'RENDERED', label: '已渲染' },
-  { value: 'ARCHIVED', label: '已归档' },
+  { value: 'EXPORTED', label: '已导出' },
 ]
 
 const PRIORITY_OPTIONS = [
@@ -38,8 +37,7 @@ const PRIORITY_OPTIONS = [
 const STATUS_COLOR: Record<string, string> = {
   DRAFT: '#d9d9d9',
   SUBMITTED: '#1890ff',
-  RENDERED: '#52c41a',
-  ARCHIVED: '#8c8c8c',
+  EXPORTED: '#52c41a',
 }
 
 const PRIORITY_COLOR: Record<string, string> = {

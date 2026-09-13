@@ -132,8 +132,7 @@ function RequirementWorkshopPage() {
   const statusColor: Record<string, string> = {
     DRAFT: '#d9d9d9',
     SUBMITTED: '#1890ff',
-    RENDERED: '#52c41a',
-    ARCHIVED: '#8c8c8c',
+    EXPORTED: '#52c41a',
   }
 
   return (

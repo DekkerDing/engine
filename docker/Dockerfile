@@ -1,8 +1,9 @@
 # ============================================================
 # Dockerfile — 本地构建轨（日常迭代）
 # ------------------------------------------------------------
-# 【前提】先在本机完成两个 jar 的构建（前端产物已内嵌 gateway jar）：
-#     ./gradlew :engine-server:bootJar :engine-gateway:bootJar
+# 【前提】先在本机完成 server jar + 前端产物 + Go 网关二进制的构建：
+#     ./gradlew :engine-server:bootJar buildFrontend copyFrontendDist
+#     cd engine-gateway && GOOS=linux GOARCH=amd64 go build -o engine-gateway .
 # 【构建】（在仓库根目录执行，构建上下文 = 仓库根）：
 #     docker build -f docker/Dockerfile -t text-vector-engine:local .
 # 【运行】：
@@ -11,11 +12,11 @@
 #
 # 【分层策略】按"变更频率从低到高"排序，最大化层缓存复用：
 #     系统依赖(几乎不变) → pip 依赖(很少变) → 模型权重(很少变)
-#     → 应用 jar(每次迭代变)  ← 只有这层会因改代码而重建
+#     → 应用层(server jar + Go 网关二进制/静态产物，每次迭代变)
 # 模型层约 600MB、torch 层约 900MB，放前面使日常迭代构建秒级完成。
 #
-# 【运行时无 Node】镜像内没有 node/npm——前端产物已编译为静态文件
-# 内嵌 engine-gateway.jar（spec: 运行时镜像不含 Node）。
+# 【运行时无 Node、网关无 JRE】镜像内没有 node/npm——前端已编译为静态产物
+# 由 Go 网关承载（/app/static）；JRE 仅 server 使用（spec: 运行时镜像不含 Node）。
 # ============================================================
 
 # 基础镜像：temurin 8-jre + Ubuntu 22.04 (jammy)
@@ -68,9 +69,14 @@ ENV HF_HOME=/app/models
 COPY docker/entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
-# ---------- 第 5 层：应用 jar（日常迭代只重建这层） ----------
+# ---------- 第 5 层：应用（日常迭代只重建这层） ----------
+# server：Java jar；gateway：Go 单二进制 + 前端静态产物 + 配置
+# （网关二进制需在本机先交叉编译：cd engine-gateway && GOOS=linux GOARCH=amd64 go build -o engine-gateway .）
 COPY engine-server/build/libs/engine-server.jar /app/engine-server.jar
-COPY engine-gateway/build/libs/engine-gateway.jar /app/engine-gateway.jar
+COPY engine-gateway/engine-gateway /app/engine-gateway
+COPY engine-gateway/config.yaml /app/config.yaml
+COPY engine-gateway/static/ /app/static/
+RUN chmod +x /app/engine-gateway
 
 # 对外仅发布网关端口；server(:8081) 只在容器内回环，永不 EXPOSE（spec: 单容器全栈交付）
 EXPOSE 8090

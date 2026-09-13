@@ -5,14 +5,14 @@
 # 【职责】（对应 spec: container-deployment/容器内进程编排）
 #   1. 按依赖顺序启动：engine-server 先起 → 等其 /actuator/health 就绪
 #      → engine-gateway 再起（网关在业务服务健康后对外可用）
-#   2. 优雅停机：trap SIGTERM/SIGINT，转发给两个 Java 进程；
+#   2. 优雅停机：trap SIGTERM/SIGINT，转发给 server(Java) 与 gateway(Go) 进程；
 #      engine-server 的 shutdown hook 会连带优雅终止其 Python 子进程
-#   3. 不静默带病运行：任一 Java 进程退出 → 容器随之以非零码退出，
+#   3. 不静默带病运行：任一子进程退出 → 容器随之以非零码退出，
 #      便于编排器（docker restart / k8s）感知并重启
 #
-# 【为什么两个 Java 都后台起、主脚本 wait？】
+# 【为什么两个应用进程都后台起、主脚本 wait？】
 #   "gateway 前台托管"的本质是 entrypoint（PID 1）持续存活不退出。
-#   两个 Java 均后台启动后用 wait -n 监听任一退出——既保住 PID 1 的
+#   两个进程均后台启动后用 wait -n 监听任一退出——既保住 PID 1 的
 #   前台语义，又能同时感知 server 崩溃（若只 wait gateway，server 死了
 #   网关还在空转，违反"关键进程崩溃即容器退出"）。
 #
@@ -25,19 +25,19 @@ set -u  # 引用未定义变量即报错（不用 -e：wait 被信号打断返�
 APP_DIR="/app"
 DATA_DIR="${APP_DIR}/data"
 SERVER_JAR="${APP_DIR}/engine-server.jar"
-GATEWAY_JAR="${APP_DIR}/engine-gateway.jar"
+# Go 网关：单二进制，工作目录须在 /app（config.yaml 与 static/ 都按相对路径读取）
+GATEWAY_BIN="${APP_DIR}/engine-gateway"
 
 # 健康等待：首次启动模型从盘加载可能要 30-60s+，给足 180s
 HEALTH_URL="http://127.0.0.1:8081/actuator/health"
 HEALTH_TIMEOUT_SECONDS="${HEALTH_TIMEOUT_SECONDS:-180}"
 HEALTH_INTERVAL_SECONDS="${HEALTH_INTERVAL_SECONDS:-2}"
 
-# 优雅停机宽限：SIGTERM 后等待 Java（及其 Python 子进程）退出的上限
+# 优雅停机宽限：SIGTERM 后等待子进程（server 连带其 Python 子进程）退出的上限
 SHUTDOWN_GRACE_SECONDS="${SHUTDOWN_GRACE_SECONDS:-30}"
 
-# JVM 参数可经环境变量覆盖（默认值适配约 2GB 内存容器：向量全量驻留 server 堆）
+# JVM 参数可经环境变量覆盖（仅 server 需要；网关是 Go 二进制，无 JVM）
 JAVA_OPTS_SERVER="${JAVA_OPTS_SERVER:--Xms256m -Xmx768m}"
-JAVA_OPTS_GATEWAY="${JAVA_OPTS_GATEWAY:--Xms128m -Xmx256m}"
 
 SERVER_PID=""
 GATEWAY_PID=""
@@ -76,7 +76,7 @@ on_signal() {
 
 # ---------- 前置检查 ----------
 [ -f "$SERVER_JAR" ]  || { log "错误：找不到 $SERVER_JAR";  exit 1; }
-[ -f "$GATEWAY_JAR" ] || { log "错误：找不到 $GATEWAY_JAR"; exit 1; }
+[ -x "$GATEWAY_BIN" ] || { log "错误：找不到 $GATEWAY_BIN（或无执行权限）"; exit 1; }
 mkdir -p "$DATA_DIR"
 
 # 模型已烘进镜像（/app/models）——离线模式既满足"断网首启可用"，
@@ -121,12 +121,13 @@ done
 log "server 已就绪"
 
 # ---------- 3. 启动 engine-gateway（:8090，容器唯一对外端口）----------
-log "启动 engine-gateway..."
-java $JAVA_OPTS_GATEWAY -jar "$GATEWAY_JAR" &
+log "启动 engine-gateway（Go 二进制，SIGTERM 走优雅停机）..."
+cd "$APP_DIR"   # 网关按相对路径读 config.yaml 与 static/
+"$GATEWAY_BIN" &
 GATEWAY_PID=$!
 log "engine-gateway PID: $GATEWAY_PID"
 
-# ---------- 4. 托管等待：任一 Java 退出 → 全组退出 ----------
+# ---------- 4. 托管等待：任一子进程退出 → 全组退出 ----------
 # wait -n：任一子进程退出即返回（bash ≥ 4.3，jammy 为 5.1 满足）
 wait -n
 EXIT_CODE=$?

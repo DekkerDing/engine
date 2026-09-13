@@ -7,12 +7,14 @@
  *   2. include 声明子模块（每个模块是一个独立的可构建单元）
  *   3. pluginManagement 管理插件从哪里下载（必须在文件最前面）
  *
- * 本工程只有两个 Gradle 模块：
+ * 本工程只有一个 Gradle 模块：
  *   - engine-server  :8081  核心 DDD 业务（文档向量化/检索/QA）
- *   - engine-gateway :8090  聚合网关（React 静态资源 + /api 反向代理）
  *
- * 注意：frontend/（npm 工程）和 python/（Python 工程）不进 Gradle 模块——
- * 它们由各自语言的原生工具构建，Gradle 只负责"编排"它们（见各模块 build.gradle）。
+ * 注意：以下工程不进 Gradle 模块，由各自语言的原生工具构建，Gradle 只负责
+ * "编排"（前端任务挂在根 build.gradle，见根 build.gradle 尾部）：
+ *   - frontend/        npm 工程（React 前端，构建任务由根项目编排）
+ *   - engine-gateway/  Go 工程（:8090 聚合网关，go build 编译，见 docs/deployment.md）
+ *   - engine-server/python/  Python 工程（向量化引擎）
  * 这是多语言工程的最佳实践：每种语言用自己的标准构建，顶层做集成。
  * ============================================================
  */
@@ -34,6 +36,5 @@ pluginManagement {
 
 rootProject.name = 'engine'
 
-// 两个可部署的 Spring Boot 应用模块
+// 可部署的 Spring Boot 业务模块（网关已是 Go 工程，不在此列）
 include 'engine-server'
-include 'engine-gateway'

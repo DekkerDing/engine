@@ -1,9 +1,9 @@
 # .dockerignore — 收窄 docker build 构建上下文（两轨 Dockerfile 均以仓库根为上下文）
 #
 # 【设计取舍】采用"黑名单制"（只排除确定无用的），并对 **/build/ 保持放行：
-#   本地轨需要 COPY engine-{server,gateway}/build/libs/*.jar——Docker 对被排除
-#   目录不再遍历，`!` 例外救不回来，逐级放行又极易写漏；build/ 其余产物仅
-#   数十 MB，进入上下文换取规则简单可靠。追求极简上下文可自行加逐级例外。
+#   本地轨需要 COPY engine-server/build/libs/*.jar（网关已是 Go 工程，产物为
+#   二进制 + static/，不再有 build/ 目录）——Docker 对被排除目录不再遍历，
+#   `!` 例外救不回来；保留规则简单可靠。
 
 # ---------- 版本库 / IDE / 工具元数据 ----------
 .git
@@ -27,7 +27,7 @@ logs-bootrun-server.txt
 .gradle/
 **/__pycache__/
 *.pyc
-engine-gateway/frontend/dist/
+frontend/dist/
 
 # ---------- 运行期数据与日志（绝不能烘进镜像） ----------
 data/
@@ -35,3 +35,6 @@ data/
 **/lucene-index/
 logs/
 *.log
+
+# ---------- Go 网关本机构建产物（镜像内用的是容器构建/交叉编译的 Linux 二进制） ----------
+engine-gateway/engine-gateway.exe

@@ -22,7 +22,7 @@
 
 reqforge 是一个**三端协同**系统：
 - **engine-server**（:8081）—— 后端业务核心（Java / Spring Boot）
-- **engine-gateway**（:8090）—— 聚合网关：Web 静态资源 + API 反向代理
+- **engine-gateway**（:8090）—— 聚合网关：Web 静态资源 + API 反向代理（Go/net/http 实现）
 - **reqforge_app**（Flutter）—— 移动端 APP
 
 部署模式：所有服务同机部署，网关是唯一对外端口（8090），server 端口（8081）不对外暴露。
@@ -56,16 +56,19 @@ cd F:\workspace\engine
 
 # Step 1: 构建后端（Java）
 .\gradlew :engine-server:bootJar
-.\gradlew :engine-gateway:bootJar
 
-# Step 2: 构建前端（React → 静态文件 → 打入网关 jar）
-.\gradlew :engine-gateway:buildFrontend
-.\gradlew :engine-gateway:copyFrontendDist
-.\gradlew :engine-gateway:bootJar
+# Step 2: 构建前端（React → 静态文件 → 复制到 Go 网关）
+.\gradlew buildFrontend
+.\gradlew copyFrontendDist
 
-# Step 3: 检查产物
+# Step 3: 编译 Go 网关
+cd engine-gateway
+go build -o engine-gateway.exe .
+cd ..
+
+# Step 4: 检查产物
 Get-ChildItem engine-server\build\libs\engine-server.jar
-Get-ChildItem engine-gateway\build\libs\engine-gateway.jar
+Get-ChildItem engine-gateway\engine-gateway.exe
 ```
 
 ### 3.2 仅构建后端（改动 Java 代码后）
@@ -77,12 +80,12 @@ Get-ChildItem engine-gateway\build\libs\engine-gateway.jar
 ### 3.3 仅构建前端（改动 React 代码后）
 
 ```powershell
-cd engine-gateway\frontend
+cd frontend
 npm run build
-# 构建产物在 dist/ 目录，需重新执行 gateway 打包
-cd ..\..
-.\gradlew :engine-gateway:copyFrontendDist
-.\gradlew :engine-gateway:bootJar
+# 构建产物在 dist/ 目录，需复制到 Go 网关
+cd ..
+.\gradlew copyFrontendDist
+# 网关二进制不内嵌静态资源（运行时读 static/ 目录），无需重新 go build
 ```
 
 ### 3.4 Flutter APP 构建
@@ -113,8 +116,10 @@ flutter build ios --no-codesign  # iOS（需 macOS）
 1. 确保 server 已启动并健康
 2. 启动 gateway：
    ```powershell
-   java -jar engine-gateway\build\libs\engine-gateway.jar
+   cd engine-gateway
+   .\engine-gateway.exe
    ```
+   （开发模式可使用 `go run .`）
 3. 验证：浏览器打开 `http://127.0.0.1:8090` → 看到仪表盘页面
 
 ### 4.3 前端开发模式（热更新）
@@ -149,7 +154,7 @@ echo === Starting engine-server ===
 start "engine-server" java -jar engine-server\build\libs\engine-server.jar
 timeout /t 10 /nobreak >nul
 echo === Starting engine-gateway ===
-start "engine-gateway" java -jar engine-gateway\build\libs\engine-gateway.jar
+start "engine-gateway" engine-gateway\engine-gateway.exe
 echo === Done. Gateway at http://127.0.0.1:8090 ===
 pause
 ```
@@ -265,13 +270,14 @@ taskkill /PID <PID> /F
 
 ### 8.2 前端页面空白
 
-1. 检查 gateway 是否启动了前端资源构建：查看 `engine-gateway/build/frontend-static/static/` 目录是否有文件
-2. 重新构建：`.\gradlew :engine-gateway:buildFrontend :engine-gateway:copyFrontendDist :engine-gateway:bootJar`
+1. 检查 Go 网关 static/ 目录是否有前端文件：`ls engine-gateway/static/index.html`
+2. 重新构建并复制：`.\gradlew buildFrontend copyFrontendDist`
+3. 重新编译 Go 网关：`cd engine-gateway; go build -o engine-gateway.exe .`
 
 ### 8.3 API 请求 502/504
 
 1. 确认 server 是否启动：`curl http://127.0.0.1:8081/actuator/health`
-2. 确认 gateway 配置文件 `application.yml` 中 `upstream.base-url` 指向 `http://127.0.0.1:8081`
+2. 确认网关配置文件 `engine-gateway/config.yaml` 中 `upstream.base_url` 指向 `http://127.0.0.1:8081`
 
 ### 8.4 附件上传失败
 
