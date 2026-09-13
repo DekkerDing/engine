@@ -130,11 +130,17 @@ public class GoToolboxProvider implements EmbeddingProvider {
 
     // ========== hashing.* ==========
 
+    /** 降级向量化主入口：L2 归一（点积即余弦，与检索打分语义对齐）。 */
     public GoProtocol.HashResult generateHash(String text, int dim) {
+        return generateHash(text, dim, true);
+    }
+
+    /** 全参版：normalize=false 返回原始哈希幅度（确定性校验/教学对拍用）。 */
+    public GoProtocol.HashResult generateHash(String text, int dim, boolean normalize) {
         Map<String, Object> params = new HashMap<>();
         params.put("text", text);
         params.put("dim", dim);
-        params.put("normalize", true);
+        params.put("normalize", normalize);
         GoProtocol.Response resp = channel.send("hashing.generate", params);
         return GoProtocol.extractResult(resp, GoProtocol.HashResult.class);
     }

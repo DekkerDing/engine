@@ -12,7 +12,7 @@
 
 - [x] 2.1 Go 进程启动器（平台解析 + classpath 解压 + 拉起）——初版落 `infrastructure/golang/`，随 D10 合并决策并入 `infrastructure/go/GoProcessLauncher`（定位链追加生产轨）；验证：单测 6 项全过（平台对表/windows-exe 命名/解压路径与复用/缺失资源修复指引/home 直指与目录两式/home 不存在快败）；0.5b 合并迁移后重跑 7 项全过（目录两式随定位链简化为"直指文件"单式，另加 `@ConditionalOnProperty` 门控注解）
 - [x] 2.2 Go 通道接口与 stdio 实现（常驻读线程 + `BlockingQueue` + 毒丸 + 串行化 + 超时）——初版落 `infrastructure/golang/`，随 D10 并入 `infrastructure/go/GoStdioChannel`（API 取手写版 `send(Map)→Response`，内核取已测硬化：`poll(timeout)` 免忙等/`EngineException`/迟到帧丢弃）；验证：FakeGoToolbox 假进程集成测试 5 项全过（握手往返/超时+迟到帧自愈/未知方法通道存活/优雅关闭后未运行/启动前快败）；0.5b 合并迁移后全量 154 项重跑全绿（迟到帧时序裕度修正 2s→1.2s，抗全量并发抖动）
-- [ ] 2.3 `GoToolboxProvider` 门面补齐与 `GoProtocol` 对齐：`sys.stats`、`hashing.generate` 参数（text/dim/normalize）、错误帧转 `EngineException.downstream`；验证：假通道单测覆盖 send→DTO 解析与错误翻译
+- [x] 2.3 `GoToolboxProvider` 门面补齐与 `GoProtocol` 对齐：`sys.stats`、`hashing.generate` 参数（text/dim/normalize）、错误帧转 `EngineException.downstream`；验证：假通道单测 10 项全过（tokenize/keywords/chunk/vectorSearch 参数传递与 DTO 解析、generateHash normalize 三参、stats、embedBatch 512 维降级组装、错误帧转 503 EngineException、空 result 容错、insert/delete 计数）（实测：GoToolboxProviderTest tests=10 failures=0；错误翻译落在通道层 call()，假通道按同款语义回放验证）
 - [ ] 2.4 两级装配门控：`engine.go.enabled`（默认 false）控通道三件套，`go-toolbox` Profile + enabled 控降级 provider；`application.yml` 加 `engine.go.*` 配置块（enabled/binary/command/stdio-timeout-seconds）；验证：默认配置启动零 Go 进程零 go-runtime 目录，enabled=true 启动日志含握手成功，go-toolbox Profile 下 TEXT 模态无重复注册（0.5b 已落 `@ConditionalOnProperty`×3 与配置块；双态启动验证待做）
 - [ ] 2.5 毒丸与崩溃语义：杀死 Go 子进程后在途/后续调用快速失败、`@PreDestroy` 发 sys.shutdown；验证：集成测试杀进程后断言调用抛「引擎已退出」语义错误且不阻塞
 
