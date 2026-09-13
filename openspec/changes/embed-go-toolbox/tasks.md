@@ -10,27 +10,26 @@
 
 ## 2. Java 侧通道与装配开关
 
-- [x] 2.1 新增 `infrastructure/golang/GoProcessLauncher`（按 `os.name/os.arch` 从 `classpath:/golang/<platform>/` 解压到 `./go-runtime/` 并拉起，镜像 `PythonProcessLauncher`）；验证：单测断言平台目录解析与解压产物路径（实测：6 项全过——平台对表/windows-exe 命名/解压路径与复用/缺失资源修复指引/home 直指与目录两式/home 不存在快败）
-- [x] 2.2 新增 `GoChannel` 接口与 `StdioGoChannel`（常驻读线程 + `BlockingQueue` + 毒丸 + `synchronized call()` + 超时，镜像 `StdioChannel`）；验证：集成测试跑通 call→响应往返与超时分支（假进程/短超时构造）（实测：FakeGoToolbox 假进程 5 项全过——握手往返、超时+迟到帧自愈、未知方法 1001 通道存活、优雅关闭后未运行、启动前快败）
-- [ ] 2.3 新增 `GoToolboxClient`（门面：方法名 + params → result，base64 float32 编解码工具）与 `engine.go.*` 配置项（enabled 默认 false / call-timeout / startup-timeout）；验证：单测覆盖 base64 向量编解码 round-trip
-- [ ] 2.4 `@ConditionalOnProperty` 装配：enabled=true 时启动即拉起 + `sys.ping` 握手；false 时零装配（无 Go 进程）；验证：两种配置各启动一次，true 时日志含握手成功、false 时无 go-runtime 目录创建
-- [ ] 2.5 毒丸与崩溃语义：杀死 Go 子进程后在途/后续 call 快速失败、`@PreDestroy` 发 shutdown；验证：集成测试杀进程后断言调用抛「引擎不可用」且不再阻塞
+- [x] 2.1 Go 进程启动器（平台解析 + classpath 解压 + 拉起）——初版落 `infrastructure/golang/`，随 D10 合并决策并入 `infrastructure/go/GoProcessLauncher`（定位链追加生产轨）；验证：单测 6 项全过（平台对表/windows-exe 命名/解压路径与复用/缺失资源修复指引/home 直指与目录两式/home 不存在快败），合并后随包迁移重跑
+- [x] 2.2 Go 通道接口与 stdio 实现（常驻读线程 + `BlockingQueue` + 毒丸 + 串行化 + 超时）——初版落 `infrastructure/golang/`，随 D10 并入 `infrastructure/go/GoStdioChannel`（API 取手写版 `send(Map)→Response`，内核取已测硬化：`poll(timeout)` 免忙等/`EngineException`/迟到帧丢弃）；验证：FakeGoToolbox 假进程集成测试 5 项全过（握手往返/超时+迟到帧自愈/未知方法通道存活/优雅关闭后未运行/启动前快败），合并后随包迁移重跑
+- [ ] 2.3 `GoToolboxProvider` 门面补齐与 `GoProtocol` 对齐：`sys.stats`、`hashing.generate` 参数（text/dim/normalize）、错误帧转 `EngineException.downstream`；验证：假通道单测覆盖 send→DTO 解析与错误翻译
+- [ ] 2.4 两级装配门控：`engine.go.enabled`（默认 false）控通道三件套，`go-toolbox` Profile + enabled 控降级 provider；`application.yml` 加 `engine.go.*` 配置块（enabled/binary/command/call-timeout/startup-timeout）；验证：默认配置启动零 Go 进程零 go-runtime 目录，enabled=true 启动日志含握手成功，go-toolbox Profile 下 TEXT 模态无重复注册
+- [ ] 2.5 毒丸与崩溃语义：杀死 Go 子进程后在途/后续调用快速失败、`@PreDestroy` 发 sys.shutdown；验证：集成测试杀进程后断言调用抛「引擎已退出」语义错误且不阻塞
 
-## 3. S2 文件流式哈希与上传去重
+## 3. 场景一：text.* 与 hashing.*（Go 注册 + Java 对拍）
 
-- [ ] 3.1 Go 侧 `internal/hashing/`：单文件流式 SHA-256（`io.Copy` 到 `sha256.New()`，内存有界）；验证：Go 单测对已知内容断言哈希值，对大文件断言内存平稳（或以 buffer 复用逻辑走查记录）
-- [ ] 3.2 Go 侧批量哈希 worker pool（goroutine + channel 分发/汇聚，并发度 = GOMAXPROCS）与路径校验（规范化后必须位于传入根目录内，越界拒绝）；验证：Go 单测覆盖批量正确性、越界路径拒绝、混合成败批次
-- [ ] 3.3 Java 侧 `ChecksumPort` 端口 + Java 兜底实现（`MessageDigest` 流式）+ Go 适配器（`hash.file`/`hash.batch`）；验证：单测双实现各算同文件哈希一致
-- [ ] 3.4 上传链路接入：摄取前取哈希，SQLite 存内容哈希列（首次摄取回填），同哈希跳过解析/向量化直接关联既有内容；验证：集成测试——同内容二传显著快于首传且库内无重复内容，不同内容同名文件正常摄取
-- [ ] 3.5 上传契约回归：大小限制/类型校验行为不变；验证：跑既有上传相关单测全绿 + 手工超限上传仍 400
+- [ ] 3.1 Go 侧 `internal/engine` 注册 `text.chunk`/`text.tokenize`/`text.keywords`（接 `internal/text` 手写实现）；修正 `appendChunk` 为 rune 感知硬切（spec 中文正确性硬约束）；验证：`go test ./internal/text/...` 覆盖中文无标点长文硬切不乱码 + Go 单测全绿
+- [ ] 3.2 Go 侧注册 `hashing.generate`（接 `internal/hashing`，参数 text/dim/normalize，result 含 vector/dim/degraded）与 `sys.stats`（engine/version/vector_count/tools）；验证：`go test ./...` 全绿 + 手工管道帧实测
+- [ ] 3.3 Java 对拍测试：`text.chunk` vs Java 分块器（块数/块文本/重叠一致）、`hashing.generate` 确定性（两次调用逐元素相等、normalize 模长=1）；验证：假通道或直连引擎的对拍单测全绿
+- [ ] 3.4 降级向量化集成：`go-toolbox` Profile 下摄取走 `GoToolboxProvider.embedBatch`（hashing.generate，degraded=true），检索链路正常完成；验证：集成测试摄取→检索闭环（哈希向量语义检索结果为确定性降级输出，不做相关性断言，只断链路不断线）
 
-## 4. S1 并行向量扫描与索引副本
+## 4. 场景二：vector.*（索引副本 + 并行扫描）
 
-- [ ] 4.1 Go 侧 `internal/vscan/` 副本存储：连续 `[]float32` 矩阵 + 侧表（entryId→行、docId→行集合、空间标签），`vscan.index.replace`/`vscan.index.remove`（逻辑删除标记）方法；验证：Go 单测覆盖 replace 幂等、remove 后查询不命中
-- [ ] 4.2 Go 侧 `vscan.query`：按 (sourceType, modelKey, dimension) 过滤 + 分片并行点积 + 局部 top-K 归并，定序规则 (score 容差 1e-6, entryId 字典序)；验证：Go 单测随机数据与暴力参考实现全量对拍一致（含平分定序）
-- [ ] 4.3 Java 侧 Go 适配器：实现与 `InMemoryVectorIndex.search` 同签名语义的检索路径 + 空间闸门判定（错误文案与 `spaceGateError` 逐字对齐）；验证：单测构造「同模态模型切换」场景断言 400 与指引文案
-- [ ] 4.4 副本同步接线：`InMemoryVectorIndex` replace/remove 后同步发复制命令（先于摄取事务返回）；启动时全量灌入；验证：集成测试「摄取完成立刻检索可命中新块」+ 重启后副本行数 = 索引 size
-- [ ] 4.5 双实现对拍：同查询向量/同 topK/同过滤，Java 扫描与 Go 扫描结果集合与顺序一致（1e-6 容差）；验证：对拍集成测试跑通并记录样本数据对拍输出
+- [ ] 4.1 Go 侧 `internal/vector/` 索引副本：连续 float 矩阵 + 空间标签（source_type/model_key/dimension），`vector.insert`（按 docId 幂等替换）/`vector.delete`（逻辑删除）/`vector.similarity`；验证：Go 单测覆盖 insert 幂等/删除不命中/相似度对角线=1
+- [ ] 4.2 Go 侧 `vector.search`：空间过滤 + goroutine 分片并行点积 + 局部 top-K 归并（定序：score 容差 1e-6 内按 document_id/chunk_index 字典序稳定）；验证：Go 单测随机数据与串行参考实现全量对拍（含平分定序）
+- [ ] 4.3 Java 侧检索适配：经 `GoToolboxProvider.vectorSearch` 的检索路径 + 空间闸门判定（与 `InMemoryVectorIndex.spaceGateError` 语义对齐）；验证：单测构造「同模态模型切换」场景断言 400 与指引文案
+- [ ] 4.4 副本同步接线：`InMemoryVectorIndex` replace/remove 后经通道发 `vector.insert`/`vector.delete`（复制先于摄取返回）；enabled 启动后全量灌入；验证：集成测试「摄取完成立刻经 vector.search 可命中新块」+ 重启后 vector_count = 索引 size
+- [ ] 4.5 双实现对拍：同查询/topK/过滤，Java `InMemoryVectorIndex` 与 `vector.search` 命中集合与顺序一致（1e-6 容差）；验证：对拍集成测试跑通并记录样本对拍输出
 
 ## 5. 构建编排与 CI
 

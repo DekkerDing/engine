@@ -23,8 +23,9 @@
 **Non-Goals:**
 
 - 不做 Go 承接外部请求/网关（方向反转的结论，见 D1；旧 Go 网关已退役）
+- **文件哈希与上传内容寻址去重（原 S2 蓝图）延后为独立变更**——合并手写代码时确认场景集合为 text/vector/hashing 降级三组，S2 不在本变更
 - 不做运行时热切换/FailoverChannel 式双通道（YAGNI，v2 再议）
-- 不做 ANN/量化/ mmap 共享内存（先正确、再 measurable——S1 只做「并行暴力扫」，索引副本走 stdio 复制）
+- 不做 ANN/量化/ mmap 共享内存（先正确、再 measurable——vector.* 只做「并行暴力扫」，索引副本走 stdio 复制）
 - 不迁移 PDF/DOCX 解析与 Lucene 全文（生态在 Java，迁移是倒退）
 
 ## Decisions
@@ -39,7 +40,7 @@
 
 ### D3 · 协议帧与方法注册表
 
-帧格式与 `server_stdio.py` 同构：请求 `{"id":n,"method":"...","params":{...}}` → 响应 `{"id":n,"result":{...}}` 或 `{"id":n,"error":{"code":...,"message":...}}`。Go 侧核心是一张 `map[string]Handler` 注册表（新增工具 = 新增一个包 + 一行注册）。方法名命名空间 `hash.file` / `hash.batch` / `vscan.query` / `vscan.index.replace` / `vscan.index.remove` / `sys.ping`。**大负载编码**：向量数据用 base64 编码的 float32 little-endian 字节（JSON 数组序列化 512 维 float 慢且体积 4-5 倍）。
+帧格式与 `server_stdio.py` 同构：请求 `{"id":n,"method":"...","params":{...}}` → 响应 `{"id":n,"result":{...}}` 或 `{"id":n,"error":{"code":...,"message":...}}`。Go 侧核心是一张 `map[string]Handler` 注册表（新增工具 = 新增一个包 + 一行注册）。方法命名空间以手写代码为准：`text.chunk` / `text.tokenize` / `text.keywords` / `vector.search` / `vector.insert` / `vector.delete` / `vector.similarity` / `hashing.generate` / `sys.ping` / `sys.shutdown` / `sys.stats`。Java 侧通道是类型化薄接口：`send(method, Map) → GoProtocol.Response`（DTO 解析集中在 `GoProtocol`，各业务门面自行 `extractResult`）。**大负载编码**：向量数据用 base64 编码的 float32 little-endian 字节（JSON 数组序列化 512 维 float 慢且体积 4-5 倍）。
 
 ### D4 · S1 索引副本同步（本设计含金量最高的决策）
 
@@ -69,13 +70,14 @@ JVM InMemoryVectorIndex                Go vscan（副本）
 - 关闭：`@PreDestroy` 发 `sys.shutdown` 帧并等待进程退出（超时强杀）；stdin EOF 同效
 - 崩溃：读线程收到 EOF → 投毒丸 → 在途 call 立即失败；后续 call 报「引擎不可用」；`goToolbox` 健康 DOWN；重启应用即恢复（v1 不自动重启子进程）
 
-### D7 · 装配与端口
+### D7 · 装配与端口（两级开关）
 
-- domain 不新增「Go」概念——只定义/复用计算端口：`ChecksumPort`（上传去重用）与既有向量检索路径；`infrastructure/golang/` 提供适配器，`@ConditionalOnProperty(name="engine.go.enabled", havingValue="true")` 装配，否则装配 Java 现役实现
-- 上传链路：`DocumentService` 摄取前经 `ChecksumPort` 取哈希查重——Go 开 = 内容寻址秒传；Go 关 = Java `MessageDigest` 兜底（Java 兜底实现一并落地，两路都可用，这也是自测对拍的基准）
-- InMemoryVectorIndex 保持现役：Go 开时它仍维护 JVM 侧索引（副本同步的源头 + 兜底实现），不做删除
+- **第一级 `engine.go.enabled`（默认 false）**：`@ConditionalOnProperty` 控制 Go 通道三件套（Launcher/Channel）是否装配——false 时零 Bean 零进程零解压，spec「默认零变化」由此保证（手写初版的无条件 `@Component` 是启动炸弹，合并时已修）
+- **第二级 `go-toolbox` Profile**：`GoToolboxProvider`（`@Profile` + enabled 双条件）接管 TEXT 模态 EmbeddingProvider——`EmbeddingProviderRegistry` 对同模态重复注册启动即炸，故降级模式须以 Profile 让 python provider（failover/py4j/stdio）让位，两级缺一不可
+- domain 不新增「Go」概念：`GoToolboxProvider` 实现既有 `EmbeddingProvider` 端口（降级哈希向量），文本/向量工具经门面方法直接暴露给需要的应用服务
+- InMemoryVectorIndex 保持现役：Go 开时它仍维护 JVM 侧索引（副本同步的源头 + 对拍基准 + 关闭态兜底），不做删除
 
-### D8 · 构建编排
+### D8 · 构建编排（双轨二进制定位）
 
 - `engine-server/golang/`：`go.mod`（module engine/gotoolbox，Go 1.21+，零三方依赖）+ `cmd/toolbox/main.go` + `internal/`（router、protocol、hashing、vscan、teaching 头注释）
 - Gradle：`buildGoToolbox`（Exec 两次：`GOOS=windows/amd64`、`GOOS=linux/amd64`；`onlyIf` 源码指纹变化才重编——镜像前端 fingerprint 模式；本地无 Go 工具链且开关关闭时允许跳过）→ `packageGolang`（Copy → `build/golang-pack/golang/<platform>/`）→ `sourceSets` 注册 → 随 bootJar 入 `classpath:/golang/`
@@ -86,6 +88,10 @@ JVM InMemoryVectorIndex                Go vscan（副本）
 ### D9 · 教学注释规约
 
 Go 文件头统一结构：包职责一句话 →【教学注释】Go 概念块（每个新 Go 概念锚定 Java 对应物：goroutine↔Thread、channel↔BlockingQueue、interface 隐式实现↔implements、error 值↔异常、defer↔try-finally、包模型↔类层次）。Java 侧新类沿用仓库既有【教学注释】惯例。/docs 两篇新文档含「Go 速成路线图」章节（按本变更代码走读顺序编排）。
+
+### D10 · 与并行手写代码的合并决策（正典 = `infrastructure/go/`）
+
+实施期间维护者并行手写了 `infrastructure/go/`（GoChannel/GoStdioChannel/GoProcessLauncher/GoProtocol/GoToolboxProvider）与任务清单落地的 `infrastructure/golang/` 形成撞车。合并裁决：**手写包为正典**（类型化协议 + 业务门面更完整、更贴维护者意图），任务产物并入——通道硬化（`poll(timeout)` 免忙等、`EngineException` 纪律、迟到帧丢弃语义、writer 判空）、classpath 生产轨定位链、装配门控默认关、全部单测随迁。`infrastructure/golang/` 删除。Go 侧 `internal/text`（分块/分词/关键词）、`internal/hashing`（哈希向量）为手写成果直接采用；其中 `appendChunk` 的 byte 硬切存在中文 UTF-8 截断风险（代码注释自认"近似"），合并时修正为 rune 感知硬切——spec 的中文正确性硬约束优先于性能近似。
 
 ## Risks / Trade-offs
 
