@@ -10,12 +10,12 @@
  * 本工程只有一个 Gradle 模块：
  *   - engine-server  :8081  核心 DDD 业务（文档向量化/检索/QA）
  *
- * 注意：以下工程不进 Gradle 模块，由各自语言的原生工具构建，Gradle 只负责
- * "编排"（前端任务挂在根 build.gradle，见根 build.gradle 尾部）：
- *   - frontend/        npm 工程（React 前端，构建任务由根项目编排）
- *   - engine-gateway/  Go 工程（:8090 聚合网关，go build 编译，见 docs/deployment.md）
- *   - engine-server/python/  Python 工程（向量化引擎）
- * 这是多语言工程的最佳实践：每种语言用自己的标准构建，顶层做集成。
+ * 注意：以下资产不进 Gradle sourceSet，由各自语言的原生工具构建，Gradle 负责
+ * "编排"并随 engine-server 的 jar 一起提供（单 JAR 合体，见 docs/reqforge-single-jar-spec.md）：
+ *   - engine-server/frontend/  npm 工程（React 前端，任务链挂在本模块 build.gradle，
+ *                              产物入 jar 的 classpath:/static/）
+ *   - engine-server/python/    Python 工程（向量化引擎，脚本入 jar 的 classpath:/python/）
+ * 一个 Gradle 模块一棵完整资产树：Java + 前端 + Python 随同一个 jar 部署。
  * ============================================================
  */
 

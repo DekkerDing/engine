@@ -27,7 +27,7 @@ logs-bootrun-server.txt
 .gradle/
 **/__pycache__/
 *.pyc
-frontend/dist/
+engine-server/frontend/dist/
 
 # ---------- 运行期数据与日志（绝不能烘进镜像） ----------
 data/

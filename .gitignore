@@ -27,7 +27,7 @@ replay_pid*
 # ===== 前端 =====
 dist
 node_modules/
-frontend/dist/
+engine-server/frontend/dist/
 *.package-lock.json
 package-lock.json
 # ===== Python =====
