@@ -1,6 +1,8 @@
 package io.github.dekkerding.engine.infrastructure.go;
 
 import io.github.dekkerding.engine.domain.exception.EngineException;
+import io.github.dekkerding.engine.domain.model.engine.GoToolboxStatus;
+import io.github.dekkerding.engine.domain.repository.GoToolboxStatusQuery;
 import io.github.dekkerding.engine.infrastructure.go.protocol.GoProtocol;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -49,7 +51,7 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 @Component
 @ConditionalOnProperty(name = "engine.go.enabled", havingValue = "true")
-public class GoStdioChannel implements GoChannel {
+public class GoStdioChannel implements GoChannel, GoToolboxStatusQuery {
 
     private static final Logger log = LoggerFactory.getLogger(GoStdioChannel.class);
 
@@ -175,6 +177,37 @@ public class GoStdioChannel implements GoChannel {
     @Override
     public GoProtocol.Response send(String method, Map<String, Object> params) {
         return call(method, params);
+    }
+
+    // ========== GoToolboxStatusQuery（健康聚合端口） ==========
+
+    /**
+     * 健康探活（端口合同：永不抛异常，失败折叠为 ok=false + lastError）。
+     *
+     * <p>【实现者为什么是通道而非 GoToolboxProvider】健康段反映的是<b>第一级</b>开关
+     * （engine.go.enabled——通道在场性）的状态：场景二（vector.* 副本加速）只开第一级、
+     * 没有 go-toolbox Profile 时 GoToolboxProvider 不在场，但 Go 引擎确实在跑——
+     * 探活挂在第二级会把"在跑"误报成 N/A。Python 侧先例同款：Py4jChannel/StdioChannel
+     * 实现 EngineStatusQuery。
+     *
+     * <p>【UP 的定义】通道存活 <b>且</b> sys.stats 真实往返成功。只看 isAlive 不够：
+     * 读线程活着不代表 Go 能响应请求（卡死的进程照样"活着"）；sys.stats 在 Go 端
+     * 是纯内存读（微秒级），真实探活且不构成健康接口的负担。
+     */
+    @Override
+    public GoToolboxStatus status() {
+        if (!isAlive()) {
+            return GoToolboxStatus.down("Go 进程未运行（未启动或已退出）");
+        }
+        try {
+            GoProtocol.Response resp = call("sys.stats", new HashMap<>());
+            GoProtocol.StatsResult stats =
+                    GoProtocol.extractResult(resp, GoProtocol.StatsResult.class);
+            return new GoToolboxStatus(true, stats.version, stats.vector_count,
+                    stats.tools, null);
+        } catch (Exception e) {
+            return GoToolboxStatus.down("sys.stats 探活失败: " + e.getMessage());
+        }
     }
 
     /** 核心通信：序列化请求 → stdin → 队列取响应 → 反序列化。 */

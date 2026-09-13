@@ -40,7 +40,7 @@
 
 ## 6. 健康聚合扩展
 
-- [ ] 6.1 `SystemController` 的 health 组装加 `goToolbox` 段（enabled=false 时 status=N/A 或缺席语义、true 时 UP/DOWN + 关键指标），整体 status 判定规则保持；验证：curl 双态对比 JSON 留痕，既有键结构不变，前端三卡片正常渲染（浏览器实测）
+- [x] 6.1 `SystemController` 的 health 组装加 `goToolbox` 段（enabled=false 时 status=N/A 或缺席语义、true 时 UP/DOWN + 关键指标），整体 status 判定规则保持；验证：curl 双态对比 JSON 留痕，既有键结构不变，前端三卡片正常渲染（浏览器实测）（实测：镜像 EngineStatusQuery 先例的 domain 端口——GoToolboxStatus 值对象 + GoToolboxStatusQuery 端口，实现者是 GoStdioChannel（第一级门控）而非 GoToolboxProvider（第二级）——场景二只开 enabled 无 Profile 时 Provider 不在场但引擎在跑，探活挂第二级会把"在跑"误报 N/A；UP 定义 = isAlive 且 sys.stats 真实往返（纯内存读微秒级，isAlive 只证读线程活着不证能响应）；三态语义——关闭态 {enabled:false,status:"N/A"} 显式呈现（运维可见功能在场未启用）、开启 UP 带 version/vectorCount/tools 指标、探活失败 DOWN 带 lastError；不参与整体判定（加速器非必需品：DOWN=性能退化提示，检索降级本地扫兜底——外杀 Go 进程实测整体仍 UP）；单测 4 项（三态 + 既有键结构不变）；curl 四组留痕——默认态 jar 起 21s READY goToolbox=N/A 且 keys 序列 [status,gateway,server,engine,goToolbox,documents] 既有键全在；go-toolbox+enabled 从 engine-server/ 起（命中 go run 开发轨）UP version=0.2.0 十方法；空目录纯 jar 生产解压轨（GoProcessLauncher 第五级）"已解压 go-runtime\windows-amd64\toolbox.exe (4405248 字节)"→UP；外杀 toolbox.exe → DOWN lastError="Go 进程未运行"且整体 UP；前端零改动（types.ts SystemHealth 只声明 gateway/server/engine/documents 四键，TS 契约层面新键不可达，三卡片渲染无感知；浏览器实测归 8.2 冷启动清单）；全量回归 194/194 绿（+4）；顺带记录既有事实：python 脚本无 classpath 解压轨（PythonProcessLauncher 只探测 ./python-runtime、./python 两目录，默认态须从 engine-server/ 目录启动——非本变更引入，8.4 清点时对照 go 解压轨差距）
 
 ## 7. /docs 文档（增量提交：一篇一 commit）
 

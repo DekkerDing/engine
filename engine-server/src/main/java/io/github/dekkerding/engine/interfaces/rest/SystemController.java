@@ -27,6 +27,9 @@ import java.util.Map;
  * gateway    {application:"engine-gateway", status:"UP"}——保留段名兼容前端卡片
  * server     {application, status:"UP", lastError:null, lastSuccessAt:now}
  * engine     原始段语义化为 {status: UP/DEGRADED/DOWN, detail:原始段}；null 保持 null
+ * goToolbox  Go 引擎段 {enabled, status: N/A/UP/DOWN, version, vectorCount...}——
+ *            不参与整体判定（加速器非必需品：DOWN = 性能退化提示，检索/摄取有
+ *            降级兜底，见 SystemQueryService.goToolboxSection 注释）
  * documents  统计段原样透传
  * </pre>
  */
@@ -74,6 +77,8 @@ public class SystemController {
         result.put("gateway", gateway);
         result.put("server", server);
         result.put("engine", engine);
+        // goToolbox 段：整体判定不看它（见类注释）——段在即兼容（前端多出来的键不渲染）
+        result.put("goToolbox", aggregated.get("goToolbox"));
         result.put("documents", aggregated.get("documents"));
         return result;
     }
