@@ -17,11 +17,13 @@ package engine
 
 import (
 	"encoding/json"
+	"strconv"
 
 	"engine/gotoolbox/internal/hashing"
 	"engine/gotoolbox/internal/protocol"
 	"engine/gotoolbox/internal/router"
 	"engine/gotoolbox/internal/text"
+	"engine/gotoolbox/internal/vector"
 )
 
 // Version 引擎版本：构建期可注入
@@ -33,6 +35,7 @@ var Version = "0.2.0"
 // Engine 工具实例的宿主——各场景包的字段一处可见全部依赖。
 type Engine struct {
 	chunker *text.Chunker
+	index   *vector.Index
 }
 
 // New 构造引擎。chunker 用 Java 端对齐的默认值（target=400/overlap=1，
@@ -40,6 +43,7 @@ type Engine struct {
 func New() *Engine {
 	return &Engine{
 		chunker: text.NewChunker(text.DefaultChunkSize, text.DefaultOverlapSentences),
+		index:   vector.NewIndex(),
 	}
 }
 
@@ -90,16 +94,100 @@ func (e *Engine) RegisterAll(r *router.Router) {
 	// ---- hashing.* 场景三：降级向量化（任务 3.2）----
 	r.Register("hashing.generate", e.hashingGenerate)
 
+	// ---- vector.* 场景二：索引副本（任务 4.1；search 并行扫描归 4.2）----
+	r.Register("vector.insert", e.vectorInsert)
+	r.Register("vector.delete", e.vectorDelete)
+	r.Register("vector.similarity", e.vectorSimilarity)
+
 	// ---- sys.stats 引擎自描述（任务 3.2）----
 	// tools 取 r.Methods()（闭包延迟求值——运行期调用时已含 sys.stats 自身）。
 	r.Register("sys.stats", func(params json.RawMessage) (interface{}, *protocol.ErrorObject) {
 		return map[string]interface{}{
 			"engine":       "gotoolbox",
 			"version":      Version,
-			"vector_count": 0, // 4.x 接入 vector 索引副本后回填真实行数
+			"vector_count": e.index.Size(), // 4.1 起回填真实行数（闭包引 e，运行期求值）
 			"tools":        r.Methods(),
 		}, nil
 	})
+}
+
+// vectorInsertParams vector.insert 的参数视图。
+// 条目直接复用 vector.Entry 的 json tag（chunk_idx/vector/source_type/model_key）——
+// 协议字段与领域模型同构时不必再造 DTO，Go 的 tag 同时服务两个方向。
+type vectorInsertParams struct {
+	DocumentID string         `json:"document_id"`
+	Entries    []vector.Entry `json:"entries"`
+}
+
+// vectorInsert vector.insert：按 document_id 幂等替换全部条目。
+// 语义对标 Java VectorStore.save 的"先清后写"——重传不留旧向量。
+func (e *Engine) vectorInsert(params json.RawMessage) (interface{}, *protocol.ErrorObject) {
+	var p vectorInsertParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, &protocol.ErrorObject{Code: 1002, Message: "vector.insert 参数解析失败: " + err.Error()}
+	}
+	if p.DocumentID == "" {
+		return nil, &protocol.ErrorObject{Code: 1002, Message: "vector.insert 缺少必填参数 document_id"}
+	}
+	// 条目级 doc_id 兜底：协议允许条目不重复携带（顶层统一指定），
+	// 未填时继承——冗余容错，两边都填且不一致时以条目自身为准
+	for i := range p.Entries {
+		if p.Entries[i].DocID == "" {
+			p.Entries[i].DocID = p.DocumentID
+		}
+	}
+	e.index.Replace(p.DocumentID, p.Entries)
+	return map[string]interface{}{
+		"inserted": len(p.Entries), // 0 = "清空该文档"（幂等替换的边界语义）
+		"total":    e.index.Size(),
+	}, nil
+}
+
+// vectorDeleteParams vector.delete 的参数视图。
+type vectorDeleteParams struct {
+	DocumentID string `json:"document_id"`
+}
+
+// vectorDelete vector.delete：删除一个文档的全部条目（幂等——删不存在的不报错）。
+func (e *Engine) vectorDelete(params json.RawMessage) (interface{}, *protocol.ErrorObject) {
+	var p vectorDeleteParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, &protocol.ErrorObject{Code: 1002, Message: "vector.delete 参数解析失败: " + err.Error()}
+	}
+	if p.DocumentID == "" {
+		return nil, &protocol.ErrorObject{Code: 1002, Message: "vector.delete 缺少必填参数 document_id"}
+	}
+	e.index.Remove(p.DocumentID)
+	return map[string]interface{}{
+		"deleted": p.DocumentID,
+		"total":   e.index.Size(),
+	}, nil
+}
+
+// vectorSimilarityParams vector.similarity 的参数视图。
+type vectorSimilarityParams struct {
+	VectorA []float64 `json:"vector_a"`
+	VectorB []float64 `json:"vector_b"`
+}
+
+// vectorSimilarity vector.similarity：两向量余弦，值域 [-1, 1]。
+// 维度校验在 handler 边界做——库函数 CosineSimilarity 对维不一致是 panic
+//（编程错误），协议边界必须翻译成 1002 错误帧（对端数据错误）。
+func (e *Engine) vectorSimilarity(params json.RawMessage) (interface{}, *protocol.ErrorObject) {
+	var p vectorSimilarityParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, &protocol.ErrorObject{Code: 1002, Message: "vector.similarity 参数解析失败: " + err.Error()}
+	}
+	if len(p.VectorA) == 0 || len(p.VectorB) == 0 {
+		return nil, &protocol.ErrorObject{Code: 1002, Message: "vector.similarity 缺少必填参数 vector_a/vector_b"}
+	}
+	if len(p.VectorA) != len(p.VectorB) {
+		return nil, &protocol.ErrorObject{Code: 1002, Message: "vector.similarity 维度不一致: " +
+			strconv.Itoa(len(p.VectorA)) + " vs " + strconv.Itoa(len(p.VectorB))}
+	}
+	return map[string]interface{}{
+		"score": vector.CosineSimilarity(p.VectorA, p.VectorB),
+	}, nil
 }
 
 // hashingGenerateParams hashing.generate 的参数视图。

@@ -233,7 +233,14 @@ func (idx *Index) Search(queryVec []float64, topK int, sourceType, modelKey stri
 }
 
 // GetAllEntries 返回所有索引条目的快照（供调试/统计使用）。
-// 【教学注释】返回副本而非原切片——防止调用方修改内部数据。
+//
+// 【教学注释 · 浅拷贝的陷阱：切片字段共享底层数组】
+//   Entry 是值类型，append 进结果时结构体被复制——但 Vector 是切片，
+//   切片头拷贝后仍指向同一底层数组。只做 append 的话，调用方改
+//   snapshot[0].Vector[0] 会直接污染索引内部数据。
+//   "返回副本"的合同要求深拷贝：Vector 也要 make + copy。
+//   （对标 Java：返回 List<VectorEntry> 时若条目持有可变 float[]，
+//   同样要 Arrays.copyOf 才算真快照。）
 func (idx *Index) GetAllEntries() []Entry {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
@@ -241,7 +248,10 @@ func (idx *Index) GetAllEntries() []Entry {
 	var result []Entry
 	for _, entries := range idx.byDocument {
 		for _, item := range entries {
-			result = append(result, item.Entry)
+			entry := item.Entry // 结构体值拷贝：字段级独立
+			entry.Vector = make([]float64, len(item.Vector))
+			copy(entry.Vector, item.Vector)
+			result = append(result, entry)
 		}
 	}
 	return result

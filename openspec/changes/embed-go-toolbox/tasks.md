@@ -25,7 +25,7 @@
 
 ## 4. 场景二：vector.*（索引副本 + 并行扫描）
 
-- [ ] 4.1 Go 侧 `internal/vector/` 索引副本：连续 float 矩阵 + 空间标签（source_type/model_key/dimension），`vector.insert`（按 docId 幂等替换）/`vector.delete`（逻辑删除）/`vector.similarity`；验证：Go 单测覆盖 insert 幂等/删除不命中/相似度对角线=1
+- [x] 4.1 Go 侧 `internal/vector/` 索引副本：连续 float 矩阵 + 空间标签（source_type/model_key/dimension），`vector.insert`（按 docId 幂等替换）/`vector.delete`（逻辑删除）/`vector.similarity`；验证：Go 单测覆盖 insert 幂等/删除不命中/相似度对角线=1（实测：用户手写 vector 包为正典——`map[docId][]indexedEntry` 分组 + 预归一化 scoringVec（点积=余弦）替代"连续扁平矩阵"、"map delete 物理删除"替代"逻辑删除墓碑"（连续数组原地压缩才有 tombstone 必要，分组结构下语义等价）；补 index_test.go 8 项全绿（幂等替换不双计/删除不命中含幂等删除/对角线=1 含索引路径/空间双闸门/维度不匹配跳过/零向量 score=0 非 NaN/Top-K 截断降序串行基线/GetAllEntries 快照）；顺手修 GetAllEntries 浅拷贝陷阱——Entry 值拷贝但 Vector 切片共享底层数组，兑现"返回副本"注释合同须深拷贝；engine 注册 vector.insert/delete/similarity（条目复用 vector.Entry tag、handler 边界维校验把库 panic 翻译成 1002 帧）；sys.stats vector_count 回填真实行数；管道实测 insert{inserted:2,total:2}→similarity 对角线=1→维不一致 1002→stats vector_count=2→delete total=0→stats vector_count=0）
 - [ ] 4.2 Go 侧 `vector.search`：空间过滤 + goroutine 分片并行点积 + 局部 top-K 归并（定序：score 容差 1e-6 内按 document_id/chunk_index 字典序稳定）；验证：Go 单测随机数据与串行参考实现全量对拍（含平分定序）
 - [ ] 4.3 Java 侧检索适配：经 `GoToolboxProvider.vectorSearch` 的检索路径 + 空间闸门判定（与 `InMemoryVectorIndex.spaceGateError` 语义对齐）；验证：单测构造「同模态模型切换」场景断言 400 与指引文案
 - [ ] 4.4 副本同步接线：`InMemoryVectorIndex` replace/remove 后经通道发 `vector.insert`/`vector.delete`（复制先于摄取返回）；enabled 启动后全量灌入；验证：集成测试「摄取完成立刻经 vector.search 可命中新块」+ 重启后 vector_count = 索引 size
