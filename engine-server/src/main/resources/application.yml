@@ -1,0 +1,111 @@
+# ============================================================
+# engine-server 配置（:8081）
+# 【教学注释】YAML 采用两空格缩进；同级键左对齐；冒号后必须有空格
+# ============================================================
+server:
+  # Java 核心服务端口：位于网关(:8090)之后，前端永远不直接访问本端口
+  port: 8081
+  servlet:
+    encoding:
+      # 全链路 UTF-8（Windows 默认 GBK，中文响应会乱码）
+      charset: UTF-8
+      force: true
+
+spring:
+  application:
+    name: engine-server
+  servlet:
+    multipart:
+      # 文档上传大小限制（须与 engine.documents.max-file-size-bytes 一致）
+      max-file-size: 50MB
+      max-request-size: 55MB
+  # 激活的 Profile：failover（默认，Py4J 主 + stdio 惰性回退）| py4j | stdio
+  # 见 infrastructure/python/FailoverChannel（双通道融合决策）
+  profiles:
+    active: failover
+
+# 自定义配置命名空间：统一挂在 engine.* 下，与 Spring 官方配置区分
+engine:
+  # ---------- Python 通道 ----------
+  python:
+    # Python 解释器命令：Windows 通常是 python；可用绝对路径指向 venv
+    command: python
+    # Py4J 通道：本机环回端口（流量不出机器、不走 HTTP——满足"不通过网络"的约束）
+    py4j-port: 25335
+    # 子进程启动等待上限：轮询探测就绪，不再用固定 sleep（修复蓝本 Thread.sleep(3000) 硬等待）
+    startup-timeout-ms: 60000
+    # 单次调用超时：首次调用含模型加载（约 10-30s），所以要给足
+    call-timeout-seconds: 60
+    # stdio 通道：JSON 行协议的读超时
+    stdio-timeout-seconds: 60
+    # FailoverChannel 恢复探测周期（秒）：备用通道运行期间，每隔多久检查主通道是否已复活
+    recover-interval-seconds: 30
+    # 文本模型键（双模型注册，Python 端 core/registry.py 与此对应）：
+    #   text-embedding-zh            BAAI/bge-small-zh-v1.5  512维  中文优先（默认）
+    #   text-embedding-multilingual  paraphrase-multilingual-MiniLM-L12-v2  384维 多语备选
+    # 注意：切换后维度变化，库内旧向量不可比——检索侧有维度闸门拦截并提示重新摄取
+    model-key: text-embedding-zh
+    # 模型注册表快照（Java 侧展示用；Python 端 registry.py 是唯一事实来源）
+    registry:
+      text-embedding-zh: BAAI/bge-small-zh-v1.5
+      text-embedding-multilingual: paraphrase-multilingual-MiniLM-L12-v2
+      # 【图片扩展预留】后期填入 CLIP 模型名即启用图片向量化，Java domain 层零改动
+      image-embedding: ~
+      clip: ~
+
+  # ---------- 文档域 ----------
+  documents:
+    upload-dir: data/documents
+    max-file-size-bytes: 52428800   # 50MB
+    # 分块配置（字符数）。384 维 MiniLM 模型上限 512 token ≈ 400 汉字，目标块长必须留余量
+    chunk:
+      target-size: 400
+      overlap-sentences: 1
+
+  # ---------- 持久化 ----------
+  persistence:
+    # SQLite 单文件数据库：向量(BLOB) + 文档元数据，重启不丢（修复蓝本纯内存缺陷）
+    sqlite-path: data/engine.db
+
+  # ---------- 全文检索 ----------
+  lucene:
+    index-path: lucene-index
+    # 【修复蓝本缺陷】SmartCN 真正可用（已引入 lucene-analysis-common 依赖）
+    analyzer-type: smart_cn
+
+  # ---------- 混合检索 ----------
+  search:
+    # 默认返回条数（前端不传 topK 时）
+    default-top-k: 10
+    # 融合深度：语义/全文两路各取多少条进 RRF 融合池
+    fuse-depth: 50
+    # RRF 常数 k：score = Σ 1/(k + rank)，60 为业界通用值（design.md D3）
+    rrf-k: 60
+    # 语义路最低余弦分数：低于此分的命中丢弃——余弦暴力扫永远能排出"最近邻"，
+    # 不设下限时查询毫不相关的词也会返回勉强最近的块。0.48 来自 7.1 扩样实测分布
+    # （无关词虚高 top 0.43~0.46，如"区块链元宇宙炒币"0.43/"量子计算机原理"0.46/
+    # 生僻字串 0.459；真相关命中 0.53+，如"人工智能算法"0.53/"机器学习"0.72），
+    # 分离带 0.46~0.53 取中点偏下；bge 对无关中文词常有 0.3~0.46 虚高余弦。
+    # 已知局限：乱码语料（随机生僻字块）会整体抬高余弦基线使阈值失效——
+    # 异常语料场景需人工判读；切换 MiniLM 等分布不同的模型时需重新标定
+    min-vector-score: 0.48
+
+  # ---------- 检索缓存 ----------
+  cache:
+    search-result:
+      enabled: true
+      maximum-size: 1000
+      expire-after-write: 5m
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # 网关通过 /actuator/health 探测本服务存活
+        include: health,info,metrics
+
+logging:
+  level:
+    root: info
+    # 教学建议：调试 Python 通道时改成 debug 能看到协议交互细节
+    io.github.dekkerding.engine: info

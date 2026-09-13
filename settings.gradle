@@ -1,0 +1,39 @@
+/*
+ * ============================================================
+ * settings.gradle — 多模块工程的"户口本"
+ * ------------------------------------------------------------
+ * 【教学注释】Gradle 多模块工程从这里开始：
+ *   1. rootProject.name 定义整个工程的根名称
+ *   2. include 声明子模块（每个模块是一个独立的可构建单元）
+ *   3. pluginManagement 管理插件从哪里下载（必须在文件最前面）
+ *
+ * 本工程只有两个 Gradle 模块：
+ *   - engine-server  :8081  核心 DDD 业务（文档向量化/检索/QA）
+ *   - engine-gateway :8090  聚合网关（React 静态资源 + /api 反向代理）
+ *
+ * 注意：frontend/（npm 工程）和 python/（Python 工程）不进 Gradle 模块——
+ * 它们由各自语言的原生工具构建，Gradle 只负责"编排"它们（见各模块 build.gradle）。
+ * 这是多语言工程的最佳实践：每种语言用自己的标准构建，顶层做集成。
+ * ============================================================
+ */
+
+pluginManagement {
+    repositories {
+        // 插件优先从国内镜像下载（Windows 开发机网络环境优化）
+        maven { url 'https://maven.aliyun.com/repository/gradle-plugin' }
+        maven { url 'https://maven.aliyun.com/repository/spring' }
+        gradlePluginPortal()
+        mavenCentral()
+    }
+    // 统一钉住插件版本：所有子模块用的 Spring Boot 插件版本完全一致
+    plugins {
+        id 'org.springframework.boot' version '2.6.14'
+        id 'io.spring.dependency-management' version '1.0.15.RELEASE'
+    }
+}
+
+rootProject.name = 'engine'
+
+// 两个可部署的 Spring Boot 应用模块
+include 'engine-server'
+include 'engine-gateway'

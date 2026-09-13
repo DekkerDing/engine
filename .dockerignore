@@ -1,0 +1,37 @@
+# .dockerignore — 收窄 docker build 构建上下文（两轨 Dockerfile 均以仓库根为上下文）
+#
+# 【设计取舍】采用"黑名单制"（只排除确定无用的），并对 **/build/ 保持放行：
+#   本地轨需要 COPY engine-{server,gateway}/build/libs/*.jar——Docker 对被排除
+#   目录不再遍历，`!` 例外救不回来，逐级放行又极易写漏；build/ 其余产物仅
+#   数十 MB，进入上下文换取规则简单可靠。追求极简上下文可自行加逐级例外。
+
+# ---------- 版本库 / IDE / 工具元数据 ----------
+.git
+.gitignore
+.gitattributes
+.idea
+.claude
+*.iml
+
+# ---------- 与镜像构建无关的仓库内容 ----------
+openspec
+docs
+scripts
+README.md
+LICENSE
+logs-bootrun-gateway.txt
+logs-bootrun-server.txt
+
+# ---------- 大体积缓存与可重建依赖（容器内/构建链内重建） ----------
+**/node_modules/
+.gradle/
+**/__pycache__/
+*.pyc
+engine-gateway/frontend/dist/
+
+# ---------- 运行期数据与日志（绝不能烘进镜像） ----------
+data/
+**/data/
+**/lucene-index/
+logs/
+*.log

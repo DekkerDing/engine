@@ -1,0 +1,112 @@
+/*
+ * ============================================================
+ * engine-server — 核心业务模块（:8081）
+ * ------------------------------------------------------------
+ * DDD 四层架构（见 docs/architecture.md）：
+ *   interfaces/      接入层：REST 控制器、SSE 推送
+ *   application/     应用层：用例编排（状态机、事务边界）
+ *   domain/          领域层：纯业务模型 + 仓储接口（零框架依赖）
+ *   infrastructure/  基础设施层：Py4J/stdio 通道、SQLite、Lucene 等技术实现
+ *
+ * 【教学注释】依赖方向只能从上往下：interfaces → application → domain ← infrastructure
+ *   domain 层不依赖任何框架（纯 POJO + 接口），infrastructure 实现 domain 定义的接口——
+ *   这就是"依赖倒置"：高层策略（domain）不依赖低层细节（SQLite/Python），细节依赖策略。
+ * ============================================================
+ */
+
+plugins {
+    id 'java'
+    id 'org.springframework.boot'
+    id 'io.spring.dependency-management'
+}
+
+dependencies {
+    // ---------- Web 与观测 ----------
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    // WebSocket：进度推送的进阶通道（主通道是 SSE，见 infrastructure/realtime）
+    implementation 'org.springframework.boot:spring-boot-starter-websocket'
+    // 参数校验（@Valid + jakarta.validation 注解）
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+    // 健康检查 /actuator/health（网关会探测这个端点做健康联动）
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+
+    // ---------- Python 通道 ----------
+    // Py4J：Java↔Python 的本机环回 socket 通道（默认通道）
+    implementation 'net.sf.py4j:py4j:0.10.9.7'
+
+    // ---------- 持久化 ----------
+    // SQLite：嵌入式单文件数据库，向量与文档元数据持久化（零外部服务依赖）
+    implementation 'org.xerial:sqlite-jdbc:3.44.1.0'
+
+    // ---------- 全文检索 ----------
+    // Lucene 8.11.2 是支持 JDK 1.8 的最后大版本（9.x 需要 Java 11+）
+    implementation 'org.apache.lucene:lucene-core:8.11.2'
+    // 【修复蓝本缺陷】蓝本注释掉了中文分词器依赖，导致中文检索退化为"单字切分"，搜索质量极差
+    // 【注意】Lucene 8.x 的通用模块名是 lucene-analyzers-common（analyzers 复数），
+    // 9.x 才改名 lucene-analysis-common——蓝本很可能就是写错模块名装不上才注释掉的
+    implementation 'org.apache.lucene:lucene-analyzers-common:8.11.2'
+    // 【依赖坑】SmartChineseAnalyzer 不在 analyzers-common 里！Lucene 把语种分析器
+    // 拆成独立构件：中文 SmartCN、日文 kuromoji 各自一个 artifact——漏引这个包，
+    // 编译期才报"程序包 org.apache.lucene.analysis.cn.smart 不存在"
+    implementation 'org.apache.lucene:lucene-analyzers-smartcn:8.11.2'
+    implementation 'org.apache.lucene:lucene-queryparser:8.11.2'
+    implementation 'org.apache.lucene:lucene-highlighter:8.11.2'
+
+    // ---------- 缓存 ----------
+    // Caffeine 2.9.3 是 JDK 8 兼容线（3.x 需要 Java 11+）
+    implementation 'com.github.ben-manes.caffeine:caffeine:2.9.3'
+
+    // ---------- 文档解析 ----------
+    // PDFBox 2.0.x：PDF 文本提取（JDK 8 兼容线）
+    implementation 'org.apache.pdfbox:pdfbox:2.0.31'
+    // POI 4.1.2：DOCX 文本提取（5.x 依赖树庞大，4.x 教学环境更稳）
+    implementation 'org.apache.poi:poi-ooxml:4.1.2'
+}
+
+// ============================================================
+// Python 脚本打包：让 python/ 目录随 jar 一起部署
+// ------------------------------------------------------------
+// 【设计意图】用户核心诉求"Python 代码嵌入 JAVA 工程、随 Jar 一起提供出去"。
+// 【源码归属】python/ 位于本模块内（engine-server/python，模块资产、src 外）——
+// "谁用它在谁家"：Python 引擎是 server 的资产，维护在 Java 工程一棵树里。
+// 数据流：python/ 源码 --Copy--> build/python-pack/python/ --> classpath:/python/
+// 运行时 PythonBootstrap 从 classpath 解压到 ./python-runtime/ 再拉起子进程。
+// 【注意】产物放 build/ 目录而非 src/main/resources——避免把脚本拷进源码树污染 git。
+// ============================================================
+def pythonSrcDir = file("${projectDir}/python")
+
+task packagePython(type: Copy) {
+    group = 'python'
+    description = '把 python/ 服务脚本打包进 jar 资源目录'
+    from(pythonSrcDir) {
+        // 排除 Python 运行时的临时产物
+        exclude '__pycache__/**', '*.pyc', '.venv/**', 'models/**'
+    }
+    into layout.buildDirectory.dir('python-pack/python')
+}
+
+// 把 build/python-pack 注册为资源目录，processResources 处理时会一并打入 jar
+sourceSets.main.resources.srcDir layout.buildDirectory.dir('python-pack')
+processResources.dependsOn packagePython
+
+bootJar {
+    archiveFileName = 'engine-server.jar'
+}
+
+// ============================================================
+// channelIT — 双通道集成测试（拉真实 Python 子进程）
+// 用法: gradlew :engine-server:channelIT
+// 【教学注释 · JavaExec】在 Gradle 里直接跑一个带 classpath 的 main 方法，
+// 比 jar 更轻量；测试环境自适应：python/ 目录自动定位（见测试类 findRepoRoot）
+// ============================================================
+tasks.register('channelIT', JavaExec) {
+    group = 'verification'
+    description = 'Python 双通道（stdio + py4j）集成测试'
+    classpath = sourceSets.test.runtimeClasspath
+    main = 'io.github.dekkerding.engine.infrastructure.python.PythonChannelIntegrationTest'
+    // Windows 控制台默认 GBK：强制 JVM 输出 UTF-8，否则测试日志中文全是乱码
+    jvmArgs '-Dfile.encoding=UTF-8'
+    // Python 子进程继承 UTF-8 环境
+    environment 'PYTHONIOENCODING', 'utf-8'
+    environment 'HF_ENDPOINT', 'https://hf-mirror.com'
+}

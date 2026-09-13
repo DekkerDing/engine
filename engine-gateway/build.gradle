@@ -1,0 +1,104 @@
+/*
+ * ============================================================
+ * engine-gateway — 聚合网关模块（:8080）
+ * ------------------------------------------------------------
+ * 职责（一个"最小可用网关"的三件事）：
+ *   1. 服务 React 构建产物（classpath:/static/，SPA 路由回退 index.html）
+ *   2. 反向代理 /api/** → http://127.0.0.1:8081/**（剥掉 /api 前缀，流式透传 SSE）
+ *   3. 健康联动：探测 server /actuator/health，聚合到 /api/system/health
+ *
+ * 【教学注释 · 为什么 gateway 与 server 是两个独立 Spring Boot 应用】
+ * 网关是"流量入口"（关注路由/聚合/静态资源），server 是"业务大脑"（关注领域逻辑）。
+ * 进程隔离让两者可以独立重启、独立扩容——这是微服务架构的第一课。
+ * 两者唯一的耦合是 HTTP 协议（127.0.0.1:8081），零代码依赖。
+ * ============================================================
+ */
+
+plugins {
+    id 'java'
+    id 'org.springframework.boot'
+    id 'io.spring.dependency-management'
+}
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+
+    // OkHttp：JDK 8 下唯一同时原生支持「流式响应透传(SSE) + WebSocket 客户端」的轻量 HTTP 客户端
+    // 【选型对比】HttpURLConnection 无 WS；Apache HttpClient 4.x 无 WS；WebFlux 是另一套编程模型（本期不引入）
+    implementation 'com.squareup.okhttp3:okhttp:4.9.3'
+}
+
+bootJar {
+    archiveFileName = 'engine-gateway.jar'
+}
+
+// ============================================================
+// 前端构建任务链（P3 启用，此处先声明保持构建脚本完整可读）
+// 数据流：frontend/(npm 工程) → npm run build → dist/ → 本模块 static/ → engine-gateway.jar
+// ------------------------------------------------------------
+// 【Groovy 大坑】脚本级 def 局部变量在"方法/闭包内"不可见（会按项目属性解析然后抛
+// MissingPropertyException）——必须用 ext 属性（项目级全局变量）。蓝本同款坑，注释里写过。
+// ============================================================
+ext.frontendDir = file("${projectDir}/frontend")
+ext.frontendHashFile = new File(project.buildDir, '.frontend-build-hash')
+// 产物落在 build/ 而不是 src/main/resources——构建产物不进 git（修复蓝本把 dist 拷进源码树的问题）
+def staticOutputDir = layout.buildDirectory.dir('frontend-static/static')
+// npm 调用命令平台无关化：Windows 下 npm 是 npm.cmd，必须经 cmd /c 才能被
+// ProcessBuilder/Exec 直接执行；Linux（Dockerfile.full 全构建轨容器内）直接
+// 调 npm 即可——硬编码 cmd 会让容器内构建直接失败
+ext.npmCommandLine = { String... args ->
+    def isWindows = System.getProperty('os.name').toLowerCase().contains('windows')
+    isWindows ? ['cmd', '/c', 'npm'] + args.toList() : ['npm'] + args.toList()
+}
+
+task npmInstall(type: Exec) {
+    group = 'frontend'
+    description = '安装前端依赖（node_modules 缺失时才执行）'
+    onlyIf { frontendDir.exists() && !new File(frontendDir, 'node_modules').exists() }
+    workingDir frontendDir
+    commandLine npmCommandLine('install')
+}
+
+// 计算前端源码指纹：没变化就跳过重新构建（借鉴蓝本思路，避免每次 build 都跑 npm）
+def frontendFingerprint() {
+    if (!frontendDir.exists()) return null
+    def files = fileTree(frontendDir) {
+        include 'src/**', 'public/**', 'package.json', 'vite.config.ts', 'tsconfig.json'
+        exclude 'node_modules/**', 'dist/**'
+    }
+    def source = files.files.collect { it.path + ':' + it.lastModified() }.join('\n')
+    def digest = java.security.MessageDigest.getInstance('SHA-256')
+    digest.digest(source.getBytes('UTF-8')).encodeHex().toString()
+}
+
+task buildFrontend(type: Exec) {
+    group = 'frontend'
+    description = '构建前端工程（源码指纹变化时才执行）'
+    onlyIf {
+        def fp = frontendFingerprint()
+        frontendDir.exists() && (!frontendHashFile.exists() || frontendHashFile.text != fp)
+    }
+    dependsOn npmInstall
+    workingDir frontendDir
+    commandLine npmCommandLine('run', 'build')
+    doLast {
+        def fp = frontendFingerprint()
+        if (fp != null) {
+            frontendHashFile.parentFile.mkdirs()
+            frontendHashFile.text = fp
+        }
+    }
+}
+
+task copyFrontendDist(type: Copy) {
+    group = 'frontend'
+    description = '把前端产物复制进网关 jar 的静态资源目录'
+    onlyIf { new File(frontendDir, 'dist').exists() }
+    dependsOn buildFrontend
+    from "${frontendDir}/dist"
+    into staticOutputDir
+}
+
+sourceSets.main.resources.srcDir layout.buildDirectory.dir('frontend-static')
+processResources.dependsOn copyFrontendDist

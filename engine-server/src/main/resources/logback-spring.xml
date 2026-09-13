@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ============================================================
+  logback-spring.xml — 日志配置（Spring Boot 默认日志框架）
+  【教学注释】
+  1. 控制台用带颜色的 pattern（开发友好）；文件按天滚动归档
+  2. %d 时间 | %level 级别 | %thread 线程 | %logger 类名缩写 | %msg 内容 | %n 换行
+  3. 日志规范见 docs/java-coding-standards.md：
+     - ERROR 必须附异常堆栈（log.error("msg", e) 而不是拼接 e.getMessage()）
+     - 禁止 System.out.println（无法统一收集/分级）
+  ============================================================
+-->
+<configuration>
+    <property name="LOG_PATTERN"
+              value="%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"/>
+    <property name="LOG_DIR" value="logs/server"/>
+
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>${LOG_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_DIR}/engine-server.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_DIR}/engine-server.%d{yyyy-MM-dd}.log</fileNamePattern>
+            <maxHistory>14</maxHistory>
+        </rollingPolicy>
+        <encoder>
+            <pattern>${LOG_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="FILE"/>
+    </root>
+</configuration>

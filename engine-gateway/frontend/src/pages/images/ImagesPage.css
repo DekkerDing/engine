@@ -1,0 +1,232 @@
+/* ============================================================
+ * 图片管理页样式 —— 上传区 + 缩略图网格 + 分页
+ * ============================================================ */
+.images-page__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;        /* 间距档位 24 */
+}
+
+.images-page__title {
+  margin: 0;
+  font-size: 16px;            /* 字号 token：页头 16 */
+  font-weight: 600;
+}
+
+.images-page__upload {
+  margin-bottom: 24px;
+}
+
+/* 缩略图网格：响应式列（auto-fill + minmax），大屏 6 列起步 */
+.images-page__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 16px;                  /* 间距档位 16 */
+}
+
+/* 单张图片卡片：固定高度让网格整齐 */
+.images-page__card {
+  overflow: hidden;
+}
+
+/* 缩略图容器：4:3 视口，灰底衬透明 PNG */
+.images-page__thumb {
+  position: relative;
+  height: 135px;
+  background: #f3f4f6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.images-page__thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;          /* 等比裁剪填充，网格不因原图比例乱行 */
+}
+
+/* 处理中遮罩：PENDING/VECTORIZING 时盖在缩略图上 */
+.images-page__mask {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;                   /* 间距档位 8 */
+  background: rgba(255, 255, 255, 0.8);
+  color: #6b7280;
+  font-size: 12px;            /* 字号 token：辅助 12 */
+}
+
+/* 失败遮罩：FAILED 时红色提示 */
+.images-page__mask--failed {
+  background: rgba(255, 241, 242, 0.92);
+  color: #cf1322;
+}
+
+.images-page__meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 8px;
+  font-size: 12px;            /* 字号 token：辅助 12 */
+  color: #6b7280;
+}
+
+.images-page__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: #374151;
+  font-weight: 500;
+}
+
+.images-page__size {
+  flex-shrink: 0;
+  color: #9ca3af;
+  font-variant-numeric: tabular-nums;
+}
+
+.images-page__pagination {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 24px;
+}
+
+/* ============================================================
+ * 标注三态展示（photo-semantic-search）
+ * ============================================================ */
+
+/* 卡片标注行：主题（重）+ 描述（灰）+ 可选"模拟识别"徽标，单行截断 */
+.images-page__annotation {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 8px;
+  font-size: 12px;            /* 字号 token：辅助 12 */
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.images-page__annotation-subject {
+  flex-shrink: 0;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #374151;
+  font-weight: 500;
+}
+
+.images-page__annotation-desc {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #6b7280;
+}
+
+/* null=未拆分：灰字占位，明示"还没识别"而非"没有标注" */
+.images-page__annotation--none {
+  color: #9ca3af;
+  font-style: italic;
+}
+
+/* 标注失败提示（不阻塞入库，hover 看原因） */
+.images-page__annotation--error {
+  flex-shrink: 0;
+  margin-left: auto;
+  color: #faad14;
+  cursor: help;
+  text-decoration: underline dotted;
+}
+
+.images-page__annotation-badge {
+  flex-shrink: 0;
+  margin-right: 0;
+  line-height: 16px;
+  font-size: 11px;
+  padding: 0 4px;
+}
+
+/* 标签行：最多展示 3 个 + 溢出计数 */
+.images-page__tags {
+  margin-top: 4px;
+  font-size: 11px;
+}
+
+.images-page__tags .ant-tag {
+  margin-right: 4px;
+  margin-bottom: 0;
+  line-height: 16px;
+  padding: 0 4px;
+  font-size: 11px;
+}
+
+/* ============================================================
+ * 批量导入（photo-semantic-search）：暂存队列 + 进度明细
+ * ============================================================ */
+
+.images-page__staged {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  margin-top: 12px;
+}
+
+.images-page__staged-list {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.images-page__staged .ant-tag {
+  margin-right: 0;
+}
+
+/* 进度弹窗统计行 */
+.images-page__import-stats {
+  display: flex;
+  gap: 16px;
+  margin: 8px 0 12px;
+  font-size: 12px;            /* 字号 token：辅助 12 */
+  color: #6b7280;
+}
+
+/* 文件明细行：文件名（截断）+ 状态徽标 + 疑似重复 + 原因入口 */
+.images-page__import-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  font-size: 12px;
+}
+
+.images-page__import-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.images-page__import-item .ant-tag {
+  margin-right: 0;
+  flex-shrink: 0;
+}
+
+.images-page__import-reason {
+  flex-shrink: 0;
+  color: #9ca3af;
+  cursor: help;
+  text-decoration: underline dotted;
+}

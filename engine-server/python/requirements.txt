@@ -1,0 +1,33 @@
+# ============================================================
+# engine Python 服务依赖清单
+# ------------------------------------------------------------
+# 【修复蓝本缺陷】蓝本 requirements.txt 缺 sentence-transformers/faiss-cpu/jieba，
+# 而代码恰恰 import 这三个——装完环境模型根本加载不了，embedding 走了假向量分支。
+#
+# 本机实测基线：Python 3.13.5 / numpy 2.4.1 / torch 2.13.0+cpu
+# 安装：pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/
+#   （清华镜像对 jieba 源码包返回 403，实测阿里云镜像可用）
+# ============================================================
+
+# 数值计算：注意范围放到 <3 以兼容本机 numpy 2.4.1（蓝本钉死 <2.0 会冲突）
+numpy>=1.24,<3
+
+# 文本向量化模型（主链路，双模型注册、按 ENGINE_TEXT_MODEL_KEY 切换）：
+#   默认 text-embedding-zh            BAAI/bge-small-zh-v1.5  (~90MB，中文优先)
+#   备选 text-embedding-multilingual  paraphrase-multilingual-MiniLM-L12-v2 (~470MB，多语)
+# 首次运行自动从 HF 镜像下载；国内加速：set HF_ENDPOINT=https://hf-mirror.com
+# （launcher 与 env_check.py 均会自动设置）
+sentence-transformers>=2.7
+
+# 中文分词（关键词提取 / 降级模式分词）
+jieba>=0.42
+
+# 图片解码（CLIP 图片编码需要：chinese-clip-vit-base-patch16 的图像预处理）
+pillow>=10.0
+
+# Py4J 服务端（py4j 通道入口需要；本机已装 0.10.9.7）
+py4j>=0.10.9.7
+
+# ---- 可选（仅 FAISS 教学对照实验用，主链路检索在 Java 侧完成）----
+# 本机 Python 3.13 需要 faiss-cpu>=1.11 才有预编译轮子；安装失败不影响主流程
+# faiss-cpu>=1.11

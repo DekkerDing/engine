@@ -1,0 +1,84 @@
+# ============================================================
+# Dockerfile.full — 全构建轨（多阶段，从源码可复现构建）
+# ------------------------------------------------------------
+# 【与本地轨（docker/Dockerfile）的区别】
+#   本地轨 COPY 本机已构建的 jar（快，日常迭代）；
+#   全构建轨 stage1 在容器内完成 npm 前端构建 + gradle jar 构建（慢，
+#   但只需要 Docker 即可从任意干净源码复现出与本地轨行为一致的镜像）。
+#   两轨 stage2 运行时层保持一致（spec: 双构建轨镜像/两轨产出等价）。
+#
+# 【构建】（仓库根目录）：
+#     docker build -f docker/Dockerfile.full -t text-vector-engine:full .
+# 【运行】与本地轨完全相同（见 docker/Dockerfile 头部注释）。
+# ============================================================
+
+# ---------- stage 1：构建（JDK 8 + 项目自带 gradlew wrapper + Node 22） ----------
+# 【为什么不用 gradle:8-jdk8 镜像】项目经 wrapper 钉住 Gradle 7.6.4（与本机
+# 开发完全同版本）；镜像自带的 Gradle 8 与 Spring Boot 2.6.14 插件不保证兼容。
+# 用 wrapper 构建还有个好处：容器内构建版本 = 开发机构建版本，可复现
+# 【修复】必须命名 AS builder：stage2 的 COPY --from=builder 依赖此 stage 名，
+#         匿名 stage 会导致 BuildKit 报 "stage builder not found"（7.1 验收复查发现）
+FROM eclipse-temurin:8-jdk-jammy AS builder
+
+# Node 22 不在 jammy 的 apt 源里，直接从官方 node 镜像借二进制
+# （同为 debian/glibc 生态，npm 是指向 lib/node_modules 的软链，整目录拷贝即可用）
+COPY --from=node:22 /usr/local/bin /usr/local/bin
+COPY --from=node:22 /usr/local/lib/node_modules /usr/local/lib/node_modules
+
+# 构建参数：容器内构建同样走国内加速（与本地开发一致的网络策略）
+ARG NPM_REGISTRY=https://registry.npmmirror.com
+# npm 读环境变量 npm_config_registry（对 gradle 任务链拉起的 npm install 生效）
+ENV npm_config_registry=${NPM_REGISTRY}
+
+WORKDIR /build
+# 源码整体进入构建上下文（配合仓库根 .dockerignore 排除 node_modules/.git/data 等）
+COPY . .
+
+# 【Windows 仓库 CRLF 防御】gradlew 在 Windows 开发机上常被 checkout 为 CRLF，
+# Linux 内直接执行会报 "bad interpreter"。统一去 CR 后再执行
+RUN sed -i 's/\r$//' gradlew && chmod +x gradlew
+
+# 一次性构建两个 jar：gateway 的 bootJar 任务链自动完成
+# npmInstall → buildFrontend → copyFrontendDist（前端产物内嵌 jar）。
+# --no-daemon：一次性容器构建不起常驻 daemon；-x test：跳过测试缩短发布构建
+# （需要带测试验证的发布可去掉 -x test）
+RUN ./gradlew :engine-server:bootJar :engine-gateway:bootJar --no-daemon -x test
+
+# ---------- stage 2：运行时（与本地轨 docker/Dockerfile 等价） ----------
+# 【同步维护提醒】此段与 docker/Dockerfile 的运行时层保持一致：
+# 系统依赖 → pip 依赖 → 模型权重 → entrypoint → jar，改其一请同步另一处
+FROM eclipse-temurin:8-jre-jammy
+
+ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
+ARG PYPI_INDEX_URL=https://pypi.org/simple
+ARG HF_ENDPOINT=https://hf-mirror.com
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        python3 python3-pip python-is-python3 curl \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
+
+WORKDIR /app
+COPY engine-server/python/requirements.txt /app/requirements.txt
+RUN pip3 install --no-cache-dir torch --index-url "${TORCH_INDEX_URL}" \
+    && pip3 install --no-cache-dir -r /app/requirements.txt -i "${PYPI_INDEX_URL}"
+
+ENV HF_ENDPOINT=${HF_ENDPOINT}
+COPY docker/download_models.py /app/download_models.py
+RUN python3 /app/download_models.py /app/models
+ENV SENTENCE_TRANSFORMERS_HOME=/app/models
+
+COPY docker/entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
+# 与本地轨唯一的差别：jar 来自 stage1 的容器内构建，而非本机 COPY
+COPY --from=builder /build/engine-server/build/libs/engine-server.jar /app/engine-server.jar
+COPY --from=builder /build/engine-gateway/build/libs/engine-gateway.jar /app/engine-gateway.jar
+
+EXPOSE 8090
+VOLUME /app/data
+HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --retries=3 \
+    CMD curl -sf http://127.0.0.1:8090/actuator/health || exit 1
+ENTRYPOINT ["/app/entrypoint.sh"]

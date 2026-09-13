@@ -1,0 +1,49 @@
+/* ============================================================
+ * 文档管理页样式 —— 上传区 + 列表 + 详情抽屉
+ * ------------------------------------------------------------
+ * 【教学注释 · 上传区的三个状态】
+ * 空闲（虚线框引导拖拽）→ 上传中（进度条）→ 完成（toast + 列表自动
+ * 出现新行）。AntD Dragger 管前两个，第三个靠列表轮询自然呈现。
+ * ============================================================ */
+.documents-page__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;        /* 间距档位 24 */
+}
+
+.documents-page__title {
+  margin: 0;
+  font-size: 16px;            /* 字号 token：页头 16 */
+  font-weight: 600;
+}
+
+.documents-page__upload {
+  margin-bottom: 24px;        /* 间距档位 24 */
+}
+
+/* 列表工具行：分页器靠右 */
+.documents-page__pagination {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;           /* 间距档位 16 */
+}
+
+/* 详情抽屉内的分块文本块 */
+.documents-page__chunk {
+  margin-bottom: 8px;         /* 间距档位 8 */
+  padding: 8px;               /* 间距档位 8 */
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f9fafb;
+  font-size: 12px;            /* 字号 token：辅助 12 */
+  color: #374151;
+  white-space: pre-wrap;      /* 保留原文换行 */
+  word-break: break-all;      /* 长串不撑破抽屉 */
+}
+
+.documents-page__chunk-index {
+  color: #9ca3af;
+  margin-right: 8px;          /* 间距档位 8 */
+  font-weight: 600;
+}

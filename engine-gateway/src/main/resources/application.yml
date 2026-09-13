@@ -1,0 +1,52 @@
+# ============================================================
+# engine-gateway 配置（:8080 流量唯一入口）
+# ============================================================
+server:
+  # 网关端口：8080 被本机某程序占用（Bound 状态），改用 8090
+  # 【实践教训】Windows 上 netstat 只看 LISTENING 会漏掉 Bound 状态的端口占用，
+  # 用 PowerShell Get-NetTCPConnection 才查得到（详见 docs/deployment.md 故障排查）
+  port: 8090
+
+spring:
+  application:
+    name: engine-gateway
+  # 【关键】网关必须关闭 multipart 自动解析！
+  # DispatcherServlet 收到 multipart 请求时会先调 checkMultipart() 把 body
+  # 解析成 Part 对象（消费掉 InputStream）——之后 ProxyController 的
+  # request.getInputStream() 只剩 0 字节，转发必然 500（实测踩坑：
+  # declared contentLength=568, written=0）。网关是"哑管道"，不理解 body
+  # 语义，multipart 的解析是 engine-server 的事。JSON 不走该分支，所以
+  # 只有上传接口挂——排查这类"部分接口挂"时优先怀疑框架的隐式预处理。
+  servlet:
+    multipart:
+      enabled: false
+  # 静态资源：前端构建产物由 buildFrontend/copyFrontendDist 任务注入 classpath:/static/
+  web:
+    resources:
+      static-locations: classpath:/static/
+
+gateway:
+  # 反向代理目标：engine-server 的内网地址（同机部署走环回，不占外部网络）
+  upstream:
+    base-url: http://127.0.0.1:8081
+    # 连接超时要短（本机环回，2 秒连不上基本就是 server 没起）
+    connect-timeout-ms: 2000
+    # 读超时要长：向量化接口背后是模型推理（首次还含模型加载），60 秒是安全下限
+    read-timeout-ms: 60000
+    # 请求体大小闸门：与 server 的 multipart max-request-size(55MB) 对齐，超限网关直接拒（不做注定被 RST 的转发）
+    max-request-body-bytes: 57671680
+  health:
+    # 健康联动：每 10 秒探测一次 server；连续 3 次失败才标记 DOWN（容忍重启窗口）
+    probe-interval-ms: 10000
+    failure-threshold: 3
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+
+logging:
+  level:
+    root: info
+    io.github.dekkerding.gateway: info

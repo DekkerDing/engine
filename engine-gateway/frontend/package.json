@@ -1,0 +1,27 @@
+{
+  "name": "engine-gateway-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "文本向量化检索 MVP 前端 — Vite5 + React18 + TS + ReactRouter6 + AntD5",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@ant-design/icons": "^6.3.2",
+    "antd": "^5.21.0",
+    "axios": "^1.7.7",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.26.2"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.8",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "typescript": "^5.6.2",
+    "vite": "^5.4.7"
+  }
+}

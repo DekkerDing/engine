@@ -1,0 +1,115 @@
+/* ============================================================
+ * 仪表盘页样式 —— 健康卡片栅格 + 调用链示意
+ * ------------------------------------------------------------
+ * 【教学注释 · 页面级栅格也走 token】
+ * 卡片行用 grid 三等分（minmax 防窄屏挤压），间距只用 24 档。
+ * 健康卡片的左侧色条是"红绿灯"语义的视觉锚点：人眼扫页面时
+ * 先看颜色再读字，色条比徽标更快定位故障组件。
+ * ============================================================ */
+.dashboard-page__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;        /* 间距档位 24 */
+}
+
+.dashboard-page__title {
+  margin: 0;
+  font-size: 16px;            /* 字号 token：页头 16 */
+  font-weight: 600;
+}
+
+.dashboard-page__refresh-info {
+  color: #6b7280;
+  font-size: 12px;            /* 字号 token：辅助 12 */
+}
+
+.dashboard-page__cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 24px;                  /* 间距档位 24 */
+  margin-bottom: 24px;
+}
+
+@media (max-width: 900px) {
+  .dashboard-page__cards {
+    grid-template-columns: 1fr;   /* 窄屏退化为单列堆叠 */
+  }
+}
+
+/* 健康卡片：左侧色条按状态着色（与 HealthBadge 颜色语义一致） */
+.dashboard-health-card {
+  position: relative;
+}
+
+.dashboard-health-card::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;                 /* 间距档位 4 */
+  border-radius: 4px 0 0 4px;
+  background: #d1d5db;        /* 默认灰（未知） */
+}
+
+.dashboard-health-card--up::before { background: #52c41a; }      /* 绿=正常 */
+.dashboard-health-card--degraded::before { background: #faad14; } /* 橙=降级 */
+.dashboard-health-card--down::before { background: #ff4d4f; }     /* 红=宕机 */
+
+.dashboard-health-card__name {
+  display: flex;
+  align-items: center;
+  gap: 8px;                   /* 间距档位 8 */
+  font-size: 14px;            /* 字号 token：正文 14 */
+  font-weight: 600;
+}
+
+.dashboard-health-card__error {
+  margin-top: 8px;
+  color: #ff4d4f;
+  font-size: 12px;
+  word-break: break-all;      /* 长错误信息（堆栈首行）不撑破卡片 */
+}
+
+/* 文档统计：一行四个数字块 */
+.dashboard-page__stats {
+  margin-bottom: 24px;
+}
+
+/* 调用链示意：横向四节点，箭头用伪元素画，不引图标库新依赖 */
+.dashboard-chain {
+  display: flex;
+  align-items: center;
+  gap: 8px;                   /* 间距档位 8 */
+  flex-wrap: wrap;            /* 窄屏允许换行，链路顺序仍可读 */
+}
+
+.dashboard-chain__node {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;                   /* 间距档位 4 */
+  padding: 8px 16px;          /* 间距档位 8/16 */
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #ffffff;
+  min-width: 96px;
+}
+
+.dashboard-chain__node-title {
+  font-size: 14px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.dashboard-chain__node-sub {
+  font-size: 12px;
+  color: #6b7280;
+  text-align: center;
+}
+
+.dashboard-chain__arrow {
+  color: #9ca3af;
+  font-size: 16px;
+  user-select: none;
+}

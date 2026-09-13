@@ -1,0 +1,5 @@
+# 前端工程独立忽略（根 .gitignore 也有全局规则，这里按 npm 工程惯例补充）
+node_modules/
+dist/
+*.local
+npm-debug.log*

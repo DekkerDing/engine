@@ -1,0 +1,66 @@
+/* ============================================================
+ * 全站布局骨架（坐标定位体系）— 手写 CSS Grid，不用 AntD Layout
+ * ------------------------------------------------------------
+ * 【教学注释 · 为什么手写 Grid 而不用 antd 的 <Layout>】
+ * 布局定位是前端的"空间感"基本功：antd Layout 封装了 flex 结构，
+ * 出问题只能翻文档；手写 Grid 每一行都可解释。规范细则见
+ * docs/frontend-standards.md（栅格坐标/间距 token/字号 token）。
+ *
+ * 【栅格坐标】grid-template 二维声明：
+ *   "top  top"   56px     ← 顶栏占两列、固定 56px 高
+ *   "side main"  1fr      ← 侧边 208px 固定宽，内容区吃剩余
+ *   /208px 1fr             ↑ 列宽定义
+ * 间距体系全站只有 4/8/16/24 四档（2px 基数的倍率），不出现魔法数。
+ * ============================================================ */
+.app-layout {
+  display: grid;
+  grid-template:
+    "top  top"  56px
+    "side main" 1fr
+    / 208px 1fr;
+  height: 100vh;          /* 视口高度：布局骨架撑满一屏，内部滚动 */
+}
+
+/* ---------- 顶栏 ---------- */
+.app-topbar {
+  grid-area: top;
+  display: flex;
+  align-items: center;
+  gap: 16px;               /* 间距档位 16 */
+  padding: 0 24px;         /* 间距档位 24 */
+  border-bottom: 1px solid #e5e7eb;
+  background: #ffffff;
+}
+
+.app-topbar__title {
+  margin: 0;
+  font-size: 16px;         /* 字号 token：页头 16 */
+  font-weight: 600;
+}
+
+.app-topbar__spacer {
+  flex: 1;                 /* 把右侧状态区推到最右 */
+}
+
+/* ---------- 侧边导航 ---------- */
+.app-sider {
+  grid-area: side;
+  border-right: 1px solid #e5e7eb;
+  background: #ffffff;
+  padding: 8px 0;          /* 间距档位 8 */
+  overflow-y: auto;
+}
+
+/* ---------- 内容区 ---------- */
+.app-main {
+  grid-area: main;
+  overflow-y: auto;        /* 长页面在内容区内部滚，顶栏侧边纹丝不动 */
+  padding: 24px;           /* 间距档位 24 */
+  background: #f5f6f8;
+}
+
+/* 内容区内的页面块统一定宽，超宽屏不至于"一行拉到底"难阅读 */
+.app-main__inner {
+  max-width: 1080px;
+  margin: 0 auto;
+}

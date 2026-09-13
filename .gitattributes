@@ -1,0 +1,33 @@
+# .gitattributes — 行尾与文本属性统一声明
+#
+# 【背景】Windows 开发机（core.autocrlf 常为 true）checkout 会把文本文件
+# 转为 CRLF，而容器内（Linux）执行的脚本必须是 LF——Dockerfile.full 已用
+# sed 兜底 gradlew，这里从 git 层面根治：凡是 Linux 要直接执行的脚本一律强制 LF。
+#
+# 已存在的文件需执行 `git add --renormalize .` 后提交才会套用新规则。
+
+# 容器/Linux 执行的脚本：强制 LF（checkout 到 Windows 也保持 LF）
+*.sh     text eol=lf
+gradlew  text eol=lf
+
+# Windows 批处理：强制 CRLF
+*.bat    text eol=crlf
+*.cmd    text eol=crlf
+
+# 常规源码：按平台规范化（提交时归一为 LF）
+*.java   text
+*.py     text
+*.ts     text
+*.tsx    text
+*.css    text
+*.json   text
+*.yml    text
+*.yaml   text
+*.md     text
+*.gradle text
+
+# 二进制文件：不做任何转换
+*.png    binary
+*.jpg    binary
+*.jar    binary
+*.db     binary

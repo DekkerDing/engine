@@ -1,0 +1,89 @@
+/* ============================================================
+ * 语义检索页样式 —— 查询区 + 结果列表 + 查询历史
+ * ============================================================ */
+.search-page__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;        /* 间距档位 24 */
+}
+
+.search-page__title {
+  margin: 0;
+  font-size: 16px;            /* 字号 token：页头 16 */
+  font-weight: 600;
+}
+
+.search-page__form {
+  margin-bottom: 24px;
+}
+
+/* 结果元信息行：计数 + 耗时 + 缓存标记 */
+.search-page__meta {
+  display: flex;
+  align-items: center;
+  gap: 16px;                  /* 间距档位 16 */
+  color: #6b7280;
+  font-size: 12px;            /* 字号 token：辅助 12 */
+  margin-bottom: 16px;
+}
+
+/* 单条命中卡片 */
+.search-page__hit {
+  margin-bottom: 16px;
+}
+
+.search-page__hit-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;                   /* 间距档位 8 */
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.search-page__hit-doc {
+  font-size: 14px;            /* 字号 token：正文 14 */
+  font-weight: 600;
+  color: #1677ff;
+  cursor: pointer;
+}
+
+.search-page__hit-rank {
+  color: #9ca3af;
+  font-size: 12px;            /* 字号 token：辅助 12 */
+  font-variant-numeric: tabular-nums;
+}
+
+.search-page__hit-snippet {
+  color: #374151;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+/* 高亮命中词（HighlightText 渲染的 <mark>） */
+.highlight-text__hit {
+  background: #fff1b8;
+  color: inherit;
+  padding: 0 2px;
+  border-radius: 2px;
+  font-weight: 600;
+}
+
+.search-page__hit-scores {
+  display: flex;
+  gap: 16px;                  /* 间距档位 16 */
+  color: #9ca3af;
+  font-size: 12px;
+  margin-top: 8px;
+}
+
+/* 会话内查询历史（tag 列表，点击重查） */
+.search-page__history {
+  margin-top: 24px;
+}
+
+.search-page__history-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;                   /* 间距档位 8 */
+}
