@@ -18,6 +18,7 @@ package engine
 import (
 	"encoding/json"
 
+	"engine/gotoolbox/internal/hashing"
 	"engine/gotoolbox/internal/protocol"
 	"engine/gotoolbox/internal/router"
 	"engine/gotoolbox/internal/text"
@@ -85,6 +86,57 @@ func (e *Engine) RegisterAll(r *router.Router) {
 	r.Register("text.chunk", e.textChunk)
 	r.Register("text.tokenize", e.textTokenize)
 	r.Register("text.keywords", e.textKeywords)
+
+	// ---- hashing.* 场景三：降级向量化（任务 3.2）----
+	r.Register("hashing.generate", e.hashingGenerate)
+
+	// ---- sys.stats 引擎自描述（任务 3.2）----
+	// tools 取 r.Methods()（闭包延迟求值——运行期调用时已含 sys.stats 自身）。
+	r.Register("sys.stats", func(params json.RawMessage) (interface{}, *protocol.ErrorObject) {
+		return map[string]interface{}{
+			"engine":       "gotoolbox",
+			"version":      Version,
+			"vector_count": 0, // 4.x 接入 vector 索引副本后回填真实行数
+			"tools":        r.Methods(),
+		}, nil
+	})
+}
+
+// hashingGenerateParams hashing.generate 的参数视图。
+// normalize 缺省 false——bool 零值即"未传"，与 Java 门面 embedBatch
+// 显式传 true 的调用习惯互补（门面两级方法已把默认语义钉在 Java 侧）。
+type hashingGenerateParams struct {
+	Text      string `json:"text"`
+	Dim       int    `json:"dim"`
+	Normalize bool   `json:"normalize"`
+}
+
+// hashingGenerate 哈希向量降级：SHA-256 轮转产出确定性伪向量。
+// 响应契约对齐 GoProtocol.HashResult：{vector, dim, degraded:true, text}。
+func (e *Engine) hashingGenerate(params json.RawMessage) (interface{}, *protocol.ErrorObject) {
+	var p hashingGenerateParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, &protocol.ErrorObject{Code: 1002, Message: "hashing.generate 参数解析失败: " + err.Error()}
+	}
+	if p.Text == "" {
+		return nil, &protocol.ErrorObject{Code: 1002, Message: "hashing.generate 缺少必填参数 text"}
+	}
+	dim := p.Dim
+	if dim <= 0 {
+		dim = 512 // 默认对齐 bge-small-zh-v1.5（Java GoToolboxProvider.dimension() 同值）
+	}
+	var vec []float64
+	if p.Normalize {
+		vec = hashing.GenerateNormalized(p.Text, dim)
+	} else {
+		vec = hashing.Generate(p.Text, dim)
+	}
+	return map[string]interface{}{
+		"vector":   vec,
+		"dim":      dim,
+		"degraded": true,
+		"text":     p.Text,
+	}, nil
 }
 
 // textChunk 分块：句子对齐滑动窗口 + rune 感知硬切（中文正确性硬约束）。

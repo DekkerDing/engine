@@ -17,6 +17,7 @@ package router
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 
 	"engine/gotoolbox/internal/protocol"
 )
@@ -50,6 +51,18 @@ func (r *Router) Register(method string, h HandlerFunc) {
 func (r *Router) Has(method string) bool {
 	_, ok := r.handlers[method]
 	return ok
+}
+
+// Methods 返回已注册方法名列表（字典序）——sys.stats 的 tools 字段数据源。
+// 【教学注释】map 遍历顺序随机是 Go 的刻意设计，需要稳定输出就必须排序——
+// 这也是 Java TreeMap 存在的理由，只是 Go 把选择权交给了调用方。
+func (r *Router) Methods() []string {
+	names := make([]string, 0, len(r.handlers))
+	for name := range r.handlers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // Dispatch 派发一帧请求：查表 → 调用 → 组装响应帧。
