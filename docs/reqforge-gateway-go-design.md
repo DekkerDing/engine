@@ -1,6 +1,12 @@
 # reqforge — Gateway Golang 替换 技术设计文档
 
-> 状态：已实现 · 已自测 · 已完成目录替换 | 版本：1.2 | 日期：2026-09-13
+> ⚠️ **历史文档（已被单 JAR 合体取代）**：Go 网关已随 single-jar-consolidation 变更退役，
+> 其职能（静态资源、SPA 回退、缓存头、健康聚合、/api 前缀）内化为 engine-server 的
+> `interfaces.web` 三件套与控制器前缀映射。对外 HTTP 契约继续有效（由合体应用逐字节兑现）。
+> 现行架构见 [reqforge-single-jar-design.md](file:///F:/workspace/engine/docs/reqforge-single-jar-design.md)。
+> 本文仅供追溯 Go 网关时代的实现细节，不再维护。
+
+> 状态（历史）：已实现 · 已自测 · 已完成目录替换 | 版本：1.2 | 日期：2026-09-13
 
 ---
 

@@ -1,6 +1,11 @@
 # reqforge — Gateway Golang 替换 规约文档
 
-> 状态：已实现 · 已自测 · 已完成目录替换 | 版本：1.2 | 日期：2026-09-13
+> ⚠️ **历史文档（已被单 JAR 合体取代）**：Go 网关已随 single-jar-consolidation 变更退役；
+> 本文的对外契约（端口/路由/缓存头/健康 JSON）继续有效——由合体后的 engine-server
+> 逐字节兑现，现行规约见 [reqforge-single-jar-spec.md](file:///F:/workspace/engine/docs/reqforge-single-jar-spec.md)。
+> 本文仅供追溯，不再维护。
+
+> 状态（历史）：已实现 · 已自测 · 已完成目录替换 | 版本：1.2 | 日期：2026-09-13
 
 ---
 
